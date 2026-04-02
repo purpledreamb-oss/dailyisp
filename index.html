@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日日一相 | Daily Daily Camera ISP</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@300;400;500;600;700&family=Noto+Sans+TC:wght@300;400;500&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f5f0eb;
+  --text: #5a5550;
+  --text-light: #8a8580;
+  --accent: #6a8a7a;
+  --accent-light: #8aaa9a;
+  --accent-bg: rgba(106,138,122,0.08);
+  --border: #d5cec7;
+  --card-bg: rgba(255,255,255,0.55);
+  --white: #fff;
+  --correct: #6a8a7a;
+  --highlight: #e8dfd6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Noto Sans TC', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.8;
+}
+
+/* ====== LOADING ====== */
+#loading-screen {
+  position: fixed; inset: 0; background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 18px; z-index: 9999;
+  transition: opacity 0.8s ease, visibility 0.8s ease;
+}
+#loading-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+#loading-screen h1 { font-family: 'Noto Serif TC', serif; font-size: 1.8rem; font-weight: 300; letter-spacing: 8px; }
+#loading-screen p { font-family: 'Cormorant Garamond', serif; font-size: 0.85rem; letter-spacing: 5px; color: var(--text-light); }
+
+/* ====== NAV ====== */
+nav {
+  position: fixed; top: 0; width: 100%; z-index: 100;
+  background: rgba(245,240,235,0.92); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 40px; display: flex; justify-content: space-between; align-items: center;
+}
+nav .logo { font-family: 'Noto Serif TC', serif; font-size: 1.05rem; font-weight: 400; letter-spacing: 4px; cursor: pointer; }
+nav .logo span { font-family: 'Cormorant Garamond', serif; font-size: 0.68rem; letter-spacing: 3px; color: var(--text-light); display: block; margin-top: 1px; }
+nav .nav-links { display: flex; gap: 24px; list-style: none; }
+nav .nav-links a { text-decoration: none; color: var(--text-light); font-size: 0.8rem; letter-spacing: 1.5px; font-weight: 300; cursor: pointer; transition: color 0.3s; }
+nav .nav-links a:hover { color: var(--accent); }
+.nav-progress { width: 60px; height: 4px; background: var(--border); border-radius: 2px; margin-left: 8px; display: inline-block; vertical-align: middle; }
+.nav-progress-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.4s; }
+
+/* ====== VIEWS ====== */
+.view { display: none; min-height: 100vh; padding: 90px 40px 60px; }
+.view.active { display: block; }
+
+/* ====== HOME ====== */
+#home { max-width: 960px; margin: 0 auto; }
+.home-header { text-align: center; padding: 40px 0 20px; }
+.home-header h1 { font-family: 'Noto Serif TC', serif; font-size: 2.2rem; font-weight: 300; letter-spacing: 10px; margin-bottom: 10px; }
+.home-header .en { font-family: 'Cormorant Garamond', serif; font-size: 0.9rem; letter-spacing: 5px; color: var(--text-light); margin-bottom: 30px; }
+.home-header .desc { font-size: 0.9rem; font-weight: 300; color: var(--text-light); line-height: 2; max-width: 600px; margin: 0 auto 36px; }
+
+/* Progress Ring */
+.progress-ring-wrap { display: flex; align-items: center; justify-content: center; gap: 32px; margin-bottom: 48px; padding: 28px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; }
+.progress-ring { position: relative; width: 120px; height: 120px; }
+.progress-ring svg { transform: rotate(-90deg); }
+.progress-ring .ring-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+.progress-ring .ring-pct { font-family: 'Cormorant Garamond', serif; font-size: 2rem; }
+.progress-ring .ring-label { font-size: 0.7rem; color: var(--text-light); letter-spacing: 2px; }
+.progress-stats { text-align: left; }
+.progress-stats .stat-row { font-size: 0.82rem; color: var(--text-light); margin-bottom: 6px; }
+.progress-stats .stat-row strong { color: var(--text); font-weight: 500; }
+
+/* Chapter Cards */
+.chapter-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.ch-card {
+  padding: 24px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--card-bg); cursor: pointer; transition: all 0.3s;
+  position: relative; overflow: hidden;
+}
+.ch-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 6px 24px rgba(0,0,0,0.06); }
+.ch-card .ch-icon { font-size: 1.6rem; margin-bottom: 10px; }
+.ch-card .ch-num { font-family: 'Cormorant Garamond', serif; font-size: 0.72rem; letter-spacing: 3px; color: var(--accent); text-transform: uppercase; }
+.ch-card .ch-title { font-family: 'Noto Serif TC', serif; font-size: 1rem; font-weight: 400; letter-spacing: 1px; margin: 4px 0 8px; }
+.ch-card .ch-desc { font-size: 0.75rem; color: var(--text-light); line-height: 1.6; }
+.ch-card .ch-progress { margin-top: 12px; height: 3px; background: var(--border); border-radius: 2px; }
+.ch-card .ch-progress-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.4s; }
+.ch-card .ch-badge {
+  position: absolute; top: 12px; right: 12px;
+  font-size: 0.6rem; letter-spacing: 1px; padding: 3px 8px; border-radius: 10px;
+  background: var(--accent-bg); color: var(--accent);
+}
+.ch-card .ch-badge.done { background: var(--accent); color: var(--white); }
+
+/* ====== CHAPTER VIEW ====== */
+#chapter { max-width: 960px; margin: 0 auto; }
+.ch-header { padding: 30px 0 24px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+.ch-header .breadcrumb { font-size: 0.75rem; color: var(--text-light); margin-bottom: 12px; cursor: pointer; }
+.ch-header .breadcrumb:hover { color: var(--accent); }
+.ch-header h2 { font-family: 'Noto Serif TC', serif; font-size: 1.6rem; font-weight: 300; letter-spacing: 5px; }
+.ch-header .ch-sub { font-family: 'Cormorant Garamond', serif; font-size: 0.82rem; letter-spacing: 3px; color: var(--text-light); margin-top: 6px; }
+.ch-header .ch-prog-bar { margin-top: 16px; height: 4px; background: var(--border); border-radius: 2px; }
+.ch-header .ch-prog-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.4s; }
+
+.section-list { display: flex; flex-direction: column; gap: 8px; }
+.sec-item {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 20px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--card-bg); cursor: pointer; transition: all 0.25s;
+}
+.sec-item:hover { border-color: var(--accent); background: var(--accent-bg); }
+.sec-item .sec-check {
+  width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  font-size: 0.7rem; color: transparent; transition: all 0.3s;
+}
+.sec-item.done .sec-check { border-color: var(--accent); background: var(--accent); color: var(--white); }
+.sec-item .sec-num { font-family: 'Cormorant Garamond', serif; font-size: 0.85rem; color: var(--text-light); min-width: 24px; }
+.sec-item .sec-title { font-size: 0.88rem; flex: 1; }
+
+/* ====== CONTENT VIEW ====== */
+#content { max-width: 780px; margin: 0 auto; }
+.content-header { padding: 30px 0 20px; }
+.content-header .breadcrumb { font-size: 0.75rem; color: var(--text-light); margin-bottom: 12px; }
+.content-header .breadcrumb a { color: var(--text-light); text-decoration: none; cursor: pointer; }
+.content-header .breadcrumb a:hover { color: var(--accent); }
+.content-header h2 { font-family: 'Noto Serif TC', serif; font-size: 1.4rem; font-weight: 400; letter-spacing: 2px; line-height: 1.6; }
+
+.content-body { padding: 20px 0 40px; }
+.content-body h3 { font-family: 'Noto Serif TC', serif; font-size: 1.15rem; font-weight: 500; margin: 36px 0 16px; letter-spacing: 1px; color: var(--text); border-left: 3px solid var(--accent); padding-left: 14px; }
+.content-body h4 { font-size: 0.95rem; font-weight: 500; margin: 24px 0 12px; color: var(--accent); }
+.content-body p { font-size: 0.92rem; line-height: 2; margin-bottom: 16px; font-weight: 300; }
+.content-body ul, .content-body ol { margin: 12px 0 20px 20px; font-size: 0.9rem; line-height: 2; }
+.content-body li { margin-bottom: 4px; }
+.content-body strong { font-weight: 500; color: var(--text); }
+.content-body code { font-family: 'Courier New', monospace; background: var(--highlight); padding: 2px 6px; border-radius: 3px; font-size: 0.85rem; }
+.content-body pre { background: #3a3530; color: #e8e0d8; padding: 20px; border-radius: 8px; overflow-x: auto; margin: 16px 0 20px; font-size: 0.82rem; line-height: 1.7; }
+
+/* Info boxes */
+.info-box { padding: 20px 24px; border-radius: 8px; margin: 20px 0; font-size: 0.88rem; line-height: 1.9; }
+.info-box.key { background: var(--accent-bg); border-left: 3px solid var(--accent); }
+.info-box.warn { background: rgba(196,160,100,0.1); border-left: 3px solid #c4a064; }
+.info-box.tip { background: rgba(100,140,180,0.08); border-left: 3px solid #648cb4; }
+.info-box.example { background: rgba(160,130,180,0.08); border-left: 3px solid #a082b4; }
+.info-box .box-title { font-weight: 500; margin-bottom: 6px; font-size: 0.85rem; letter-spacing: 1px; }
+
+/* SVG diagrams */
+.diagram { text-align: center; margin: 24px 0; }
+.diagram svg { max-width: 100%; height: auto; }
+.diagram .caption { font-size: 0.75rem; color: var(--text-light); margin-top: 10px; font-style: italic; letter-spacing: 1px; }
+
+/* Tables */
+.content-body table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 0.85rem; }
+.content-body th { background: var(--accent-bg); padding: 10px 14px; text-align: left; font-weight: 500; font-size: 0.82rem; letter-spacing: 1px; border-bottom: 2px solid var(--accent); }
+.content-body td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.content-body tr:hover td { background: rgba(106,138,122,0.03); }
+
+/* Formula */
+.formula { text-align: center; padding: 16px; margin: 16px 0; background: var(--highlight); border-radius: 8px; font-family: 'Cormorant Garamond', serif; font-size: 1.1rem; font-style: italic; letter-spacing: 1px; }
+
+/* Key Points */
+.key-points { background: var(--accent-bg); border-radius: 10px; padding: 24px; margin: 32px 0; }
+.key-points h4 { font-size: 0.85rem; letter-spacing: 2px; color: var(--accent); margin-bottom: 12px; font-weight: 500; }
+.key-points ul { list-style: none; margin: 0; padding: 0; }
+.key-points li { font-size: 0.88rem; padding: 6px 0; padding-left: 20px; position: relative; }
+.key-points li::before { content: '✦'; position: absolute; left: 0; color: var(--accent); font-size: 0.7rem; }
+
+/* Done button */
+.done-row { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; margin-top: 32px; border-top: 1px solid var(--border); }
+.done-btn {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 24px; border: 1px solid var(--accent); border-radius: 8px;
+  background: transparent; color: var(--accent); cursor: pointer;
+  font-family: 'Noto Sans TC', sans-serif; font-size: 0.85rem; letter-spacing: 2px; transition: all 0.3s;
+}
+.done-btn:hover { background: var(--accent); color: var(--white); }
+.done-btn.completed { background: var(--accent); color: var(--white); }
+.done-btn .check-icon { font-size: 1rem; }
+
+/* Nav buttons */
+.content-nav { display: flex; justify-content: space-between; margin-top: 16px; }
+.nav-btn {
+  padding: 10px 20px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--card-bg); color: var(--text); cursor: pointer;
+  font-family: 'Noto Sans TC', sans-serif; font-size: 0.82rem; letter-spacing: 1px; transition: all 0.3s;
+  text-decoration: none; max-width: 45%;
+}
+.nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+.nav-btn .nav-dir { font-size: 0.7rem; color: var(--text-light); display: block; margin-bottom: 2px; }
+
+/* ====== FOOTER ====== */
+footer { text-align: center; padding: 40px 20px; border-top: 1px solid var(--border); }
+footer p { font-family: 'Cormorant Garamond', serif; font-size: 0.78rem; letter-spacing: 4px; color: var(--text-light); }
+.footer-links { margin-top: 18px; display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; }
+.footer-links a { text-decoration: none; color: var(--text-light); font-size: 0.75rem; font-weight: 300; letter-spacing: 1px; transition: color 0.3s; }
+.footer-links a:hover { color: var(--accent); }
+.footer-desc { margin-top: 12px; font-size: 0.72rem; color: var(--text-light); opacity: 0.6; letter-spacing: 1px; }
+
+/* ====== ANIMATIONS ====== */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.fade-in { animation: fadeIn 0.5s ease forwards; }
+
+/* ====== RESPONSIVE ====== */
+@media (max-width: 768px) {
+  nav { padding: 12px 20px; }
+  nav .nav-links { gap: 14px; }
+  nav .nav-links a { font-size: 0.72rem; }
+  .view { padding: 80px 18px 40px; }
+  .home-header h1 { font-size: 1.6rem; letter-spacing: 6px; }
+  .chapter-grid { grid-template-columns: 1fr; }
+  .progress-ring-wrap { flex-direction: column; gap: 16px; text-align: center; }
+  .content-body h3 { font-size: 1.05rem; }
+  .content-nav { flex-direction: column; gap: 10px; }
+  .nav-btn { max-width: 100%; }
+}
+
+@media (max-width: 480px) {
+  .footer-links { gap: 12px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading-screen">
+  <h1>日日一相</h1>
+  <p>Daily Daily Camera ISP</p>
+</div>
+
+<!-- Nav -->
+<nav>
+  <div class="logo" onclick="goHome()">
+    日日一相
+    <span>Daily Camera ISP</span>
+  </div>
+  <div style="display:flex;align-items:center;">
+    <ul class="nav-links">
+      <a onclick="goHome()">首頁</a>
+      <a onclick="goHome()">章節</a>
+    </ul>
+    <div class="nav-progress"><div class="nav-progress-fill" id="navProgress"></div></div>
+  </div>
+</nav>
+
+<!-- HOME -->
+<div id="home" class="view active">
+  <div class="home-header fade-in">
+    <h1>日日一相</h1>
+    <div class="en">Daily Daily Camera ISP</div>
+    <div class="desc">
+      從 Sensor 到最終影像，以相機演算法工程師的視角<br>
+      系統性學習 ISP Pipeline 的每一個環節。
+    </div>
+  </div>
+
+  <div class="progress-ring-wrap fade-in">
+    <div class="progress-ring" id="homeRing"></div>
+    <div class="progress-stats" id="homeStats"></div>
+  </div>
+
+  <div class="chapter-grid fade-in" id="chapterGrid"></div>
+</div>
+
+<!-- CHAPTER -->
+<div id="chapter" class="view">
+  <div class="ch-header">
+    <div class="breadcrumb" onclick="goHome()">← 返回課程總覽</div>
+    <h2 id="chTitle"></h2>
+    <div class="ch-sub" id="chSub"></div>
+    <div class="ch-prog-bar"><div class="ch-prog-fill" id="chProgFill"></div></div>
+  </div>
+  <div class="section-list" id="sectionList"></div>
+</div>
+
+<!-- CONTENT -->
+<div id="content" class="view">
+  <div class="content-header">
+    <div class="breadcrumb">
+      <a onclick="goHome()">首頁</a> / <a id="contentChLink"></a> / <span id="contentSecTitle"></span>
+    </div>
+    <h2 id="contentTitle"></h2>
+  </div>
+  <div class="content-body" id="contentBody"></div>
+  <div class="key-points" id="keyPoints" style="display:none;"></div>
+  <div class="done-row">
+    <button class="done-btn" id="doneBtn" onclick="toggleDone()">
+      <span class="check-icon">☐</span>
+      <span>標記為已學習</span>
+    </button>
+  </div>
+  <div class="content-nav" id="contentNav"></div>
+</div>
+
+<!-- Footer -->
+<footer>
+  <p>日日一相 &copy; 2026</p>
+  <div class="footer-links">
+    <a href="https://dailynews.getlessen.com/">日日一報</a>
+    <a href="https://dailypoem.getlessen.com/">日日一詩</a>
+    <a href="https://dailycolor.getlessen.com/">日日一色</a>
+    <a href="https://dailyjoke.getlessen.com/">日日一笑</a>
+    <a href="https://dailyfortune.getlessen.com/">日日一算</a>
+    <a href="https://dailyword.getlessen.com/">日日一字</a>
+    <a href="https://ispquiz.getlessen.com/">ISP Quiz</a>
+  </div>
+  <div class="footer-desc">每一天，都值得被溫柔以待。</div>
+</footer>
+
+<!-- Content JS files -->
+<script src="content/ch1.js"></script>
+<script src="content/ch2.js"></script>
+<script src="content/ch3.js"></script>
+<script src="content/ch4.js"></script>
+<script src="content/ch5.js"></script>
+<script src="content/ch6.js"></script>
+<script src="content/ch7.js"></script>
+<script src="content/ch8.js"></script>
+
+<script>
+// ====================================================================
+//  CHAPTERS CONFIG
+// ====================================================================
+const CHAPTERS = [
+  { key: 'ch1', var: 'CH1', icon: '📷', num: 'Chapter 1', desc: '從光子到像素，了解 ISP 的完整旅程' },
+  { key: 'ch2', var: 'CH2', icon: '🔧', num: 'Chapter 2', desc: '黑電平、壞點校正、LSC 與 Demosaic' },
+  { key: 'ch3', var: 'CH3', icon: '🌫️', num: 'Chapter 3', desc: '空間域、頻率域、時域降噪與深度學習方法' },
+  { key: 'ch4', var: 'CH4', icon: '🎨', num: 'Chapter 4', desc: 'CCM、色彩空間、Gamma、LUT 與色彩準確性' },
+  { key: 'ch5', var: 'CH5', icon: '☀️', num: 'Chapter 5', desc: 'HDR、Tone Curve、Local/Global Tone Mapping' },
+  { key: 'ch6', var: 'CH6', icon: '🔪', num: 'Chapter 6', desc: 'USM、邊緣偵測、Coring、多尺度銳化' },
+  { key: 'ch7', var: 'CH7', icon: '📊', num: 'Chapter 7', desc: 'SNR、MTF、ΔE、IQ Trade-offs 與調適策略' },
+  { key: 'ch8', var: 'CH8', icon: '🚀', num: 'Chapter 8', desc: 'AI-ISP、車用需求、多鏡頭與實戰案例' },
+];
+
+// ====================================================================
+//  DATA ACCESS
+// ====================================================================
+function getChapterData(key) {
+  const map = { ch1: typeof CH1!=='undefined'?CH1:null, ch2: typeof CH2!=='undefined'?CH2:null, ch3: typeof CH3!=='undefined'?CH3:null, ch4: typeof CH4!=='undefined'?CH4:null, ch5: typeof CH5!=='undefined'?CH5:null, ch6: typeof CH6!=='undefined'?CH6:null, ch7: typeof CH7!=='undefined'?CH7:null, ch8: typeof CH8!=='undefined'?CH8:null };
+  return map[key];
+}
+
+function getAllSections() {
+  const all = [];
+  CHAPTERS.forEach(ch => {
+    const data = getChapterData(ch.key);
+    if (data) data.sections.forEach(s => all.push(s.id));
+  });
+  return all;
+}
+
+// ====================================================================
+//  PROGRESS (localStorage)
+// ====================================================================
+const STORAGE_KEY = 'dailyisp_progress';
+
+function loadProgress() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; }
+}
+function saveProgress(p) { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); }
+function isDone(id) { return !!loadProgress()[id]; }
+function setDone(id, val) { const p = loadProgress(); p[id] = val; saveProgress(p); }
+
+function getChapterProgress(chKey) {
+  const data = getChapterData(chKey);
+  if (!data) return { done: 0, total: 0 };
+  const total = data.sections.length;
+  const done = data.sections.filter(s => isDone(s.id)).length;
+  return { done, total };
+}
+
+function getTotalProgress() {
+  let done = 0, total = 0;
+  CHAPTERS.forEach(ch => {
+    const p = getChapterProgress(ch.key);
+    done += p.done; total += p.total;
+  });
+  return { done, total };
+}
+
+// ====================================================================
+//  RENDER HOME
+// ====================================================================
+function renderHome() {
+  const tp = getTotalProgress();
+  const pct = tp.total ? Math.round((tp.done / tp.total) * 100) : 0;
+
+  // Nav progress
+  document.getElementById('navProgress').style.width = pct + '%';
+
+  // Ring
+  const r = 52, c = 2 * Math.PI * r, off = c - (pct / 100) * c;
+  document.getElementById('homeRing').innerHTML = `
+    <svg width="120" height="120">
+      <circle cx="60" cy="60" r="${r}" fill="none" stroke="var(--border)" stroke-width="6"/>
+      <circle cx="60" cy="60" r="${r}" fill="none" stroke="var(--accent)" stroke-width="6"
+        stroke-dasharray="${c}" stroke-dashoffset="${off}" stroke-linecap="round" style="transition:stroke-dashoffset 0.8s;"/>
+    </svg>
+    <div class="ring-text"><div class="ring-pct">${pct}%</div><div class="ring-label">完成</div></div>`;
+
+  document.getElementById('homeStats').innerHTML = `
+    <div class="stat-row">已完成 <strong>${tp.done}</strong> / ${tp.total} 個單元</div>
+    <div class="stat-row">共 <strong>8</strong> 個章節</div>
+    <div class="stat-row">重點章節：NR・Color・Tone・銳化・IQ</div>`;
+
+  // Cards
+  const grid = document.getElementById('chapterGrid');
+  grid.innerHTML = '';
+  CHAPTERS.forEach(ch => {
+    const data = getChapterData(ch.key);
+    const p = getChapterProgress(ch.key);
+    const pctCh = p.total ? Math.round((p.done / p.total) * 100) : 0;
+    const badge = pctCh === 100 ? '<span class="ch-badge done">✓ 完成</span>' : p.done > 0 ? `<span class="ch-badge">${pctCh}%</span>` : '';
+    grid.innerHTML += `
+      <div class="ch-card" onclick="openChapter('${ch.key}')">
+        ${badge}
+        <div class="ch-icon">${ch.icon}</div>
+        <div class="ch-num">${ch.num}</div>
+        <div class="ch-title">${data ? data.title : '載入中...'}</div>
+        <div class="ch-desc">${ch.desc}</div>
+        <div class="ch-progress"><div class="ch-progress-fill" style="width:${pctCh}%"></div></div>
+      </div>`;
+  });
+}
+
+// ====================================================================
+//  CHAPTER VIEW
+// ====================================================================
+let currentChapter = null;
+
+function openChapter(chKey) {
+  currentChapter = chKey;
+  const ch = CHAPTERS.find(c => c.key === chKey);
+  const data = getChapterData(chKey);
+  if (!data) return;
+
+  const p = getChapterProgress(chKey);
+  const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+
+  document.getElementById('chTitle').textContent = `${ch.icon} ${data.title}`;
+  document.getElementById('chSub').textContent = `${ch.num} — ${p.done}/${p.total} completed`;
+  document.getElementById('chProgFill').style.width = pct + '%';
+
+  const list = document.getElementById('sectionList');
+  list.innerHTML = '';
+  data.sections.forEach((sec, i) => {
+    const done = isDone(sec.id);
+    list.innerHTML += `
+      <div class="sec-item ${done ? 'done' : ''}" onclick="openSection('${chKey}','${sec.id}')">
+        <div class="sec-check">${done ? '✓' : ''}</div>
+        <div class="sec-num">${i + 1}</div>
+        <div class="sec-title">${sec.title}</div>
+      </div>`;
+  });
+
+  showView('chapter');
+}
+
+// ====================================================================
+//  CONTENT VIEW
+// ====================================================================
+let currentSection = null;
+
+function openSection(chKey, secId) {
+  currentChapter = chKey;
+  currentSection = secId;
+
+  const ch = CHAPTERS.find(c => c.key === chKey);
+  const data = getChapterData(chKey);
+  if (!data) return;
+  const sec = data.sections.find(s => s.id === secId);
+  if (!sec) return;
+
+  document.getElementById('contentChLink').textContent = data.title;
+  document.getElementById('contentChLink').onclick = () => openChapter(chKey);
+  document.getElementById('contentSecTitle').textContent = sec.title;
+  document.getElementById('contentTitle').textContent = sec.title;
+  document.getElementById('contentBody').innerHTML = sec.content;
+
+  // Key points
+  const kp = document.getElementById('keyPoints');
+  if (sec.keyPoints && sec.keyPoints.length) {
+    kp.style.display = 'block';
+    kp.innerHTML = `<h4>📌 本節重點</h4><ul>${sec.keyPoints.map(p => `<li>${p}</li>`).join('')}</ul>`;
+  } else { kp.style.display = 'none'; }
+
+  // Done button
+  updateDoneBtn();
+
+  // Navigation
+  renderContentNav(chKey, secId);
+
+  showView('content');
+  window.scrollTo({ top: 0 });
+}
+
+function updateDoneBtn() {
+  const btn = document.getElementById('doneBtn');
+  const done = isDone(currentSection);
+  btn.className = 'done-btn' + (done ? ' completed' : '');
+  btn.innerHTML = done
+    ? '<span class="check-icon">✓</span><span>已完成學習</span>'
+    : '<span class="check-icon">☐</span><span>標記為已學習</span>';
+}
+
+function toggleDone() {
+  const done = isDone(currentSection);
+  setDone(currentSection, !done);
+  updateDoneBtn();
+  renderHome();
+}
+
+function renderContentNav(chKey, secId) {
+  const data = getChapterData(chKey);
+  const idx = data.sections.findIndex(s => s.id === secId);
+  let html = '';
+
+  if (idx > 0) {
+    const prev = data.sections[idx - 1];
+    html += `<div class="nav-btn" onclick="openSection('${chKey}','${prev.id}')"><span class="nav-dir">← 上一節</span>${prev.title}</div>`;
+  } else { html += '<div></div>'; }
+
+  if (idx < data.sections.length - 1) {
+    const next = data.sections[idx + 1];
+    html += `<div class="nav-btn" onclick="openSection('${chKey}','${next.id}')" style="text-align:right;"><span class="nav-dir">下一節 →</span>${next.title}</div>`;
+  } else {
+    // Next chapter
+    const chIdx = CHAPTERS.findIndex(c => c.key === chKey);
+    if (chIdx < CHAPTERS.length - 1) {
+      const nextCh = CHAPTERS[chIdx + 1];
+      const nextData = getChapterData(nextCh.key);
+      if (nextData) {
+        html += `<div class="nav-btn" onclick="openChapter('${nextCh.key}')" style="text-align:right;"><span class="nav-dir">下一章 →</span>${nextData.title}</div>`;
+      }
+    } else { html += '<div></div>'; }
+  }
+
+  document.getElementById('contentNav').innerHTML = html;
+}
+
+// ====================================================================
+//  VIEW SWITCHING
+// ====================================================================
+function showView(id) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  if (id === 'home') renderHome();
+}
+
+function goHome() { showView('home'); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+
+// ====================================================================
+//  INIT
+// ====================================================================
+window.addEventListener('load', () => {
+  renderHome();
+  setTimeout(() => document.getElementById('loading-screen').classList.add('hidden'), 500);
+});
+</script>
+</body>
+</html>
