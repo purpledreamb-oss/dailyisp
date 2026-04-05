@@ -1943,6 +1943,1746 @@ const CH3 = {
 <p>對 ISP 降噪工程師而言，理解感測器是否具有 ISO Invariance 性質非常重要。如果感測器高度 ISO Invariant，那麼在夜景模式中可以優先使用較低 ISO + 多幀合成的策略（如 Google Night Sight）；如果感測器在低 ISO 時 Read Noise 較高（非 ISO Invariant），則直接使用高 ISO + 單幀降噪可能更合適。Photon Transfer Curve (PTC) 分析是判斷感測器特性的黃金標準工具。</p>
 </div>
 `
+    },
+    {
+      id: "ch3_13",
+      title: "硬體 NR 架構設計：Line Buffer vs Frame Buffer",
+      content: `
+<p>在 ISP 硬體降噪模組的設計中，最核心的架構抉擇在於記憶體存取策略：使用 <strong>Line Buffer</strong>（行緩衝）還是 <strong>Frame Buffer</strong>（幀緩衝）。這個決定直接影響降噪品質、延遲（Latency）、功耗（Power）以及晶片面積（Area），是每位硬體 ISP 架構師必須深入分析的議題。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 780 520" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <rect width="780" height="520" fill="#f5f0eb" rx="8"/>
+  <text x="390" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a5550">Line Buffer vs Frame Buffer NR 架構比較</text>
+  <defs>
+    <marker id="arrNR13" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6a8a7a"/></marker>
+  </defs>
+
+  <!-- Line Buffer Section -->
+  <text x="200" y="60" text-anchor="middle" font-size="14" font-weight="bold" fill="#6a8a7a">Line Buffer NR</text>
+  <rect x="30" y="75" width="340" height="180" rx="6" fill="white" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="50" y="100" font-size="11" fill="#5a5550">Sensor Stream In →</text>
+  <rect x="50" y="110" width="280" height="18" rx="3" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="190" y="123" text-anchor="middle" font-size="10" fill="#5a5550">Line N-3</text>
+  <rect x="50" y="132" width="280" height="18" rx="3" fill="#6a8a7a" opacity="0.25" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="190" y="145" text-anchor="middle" font-size="10" fill="#5a5550">Line N-2</text>
+  <rect x="50" y="154" width="280" height="18" rx="3" fill="#6a8a7a" opacity="0.35" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="190" y="167" text-anchor="middle" font-size="10" fill="#5a5550">Line N-1</text>
+  <rect x="50" y="176" width="280" height="18" rx="3" fill="#6a8a7a" opacity="0.5" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="190" y="189" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Line N (Current)</text>
+  <rect x="50" y="198" width="280" height="18" rx="3" fill="#6a8a7a" opacity="0.35" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="190" y="211" text-anchor="middle" font-size="10" fill="#5a5550">Line N+1</text>
+  <rect x="50" y="220" width="280" height="18" rx="3" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="190" y="233" text-anchor="middle" font-size="10" fill="#5a5550">Line N+2</text>
+  <text x="200" y="253" text-anchor="middle" font-size="10" fill="#8a8580">SRAM: 7 lines × width × bit-depth</text>
+
+  <!-- Frame Buffer Section -->
+  <text x="590" y="60" text-anchor="middle" font-size="14" font-weight="bold" fill="#6a8a7a">Frame Buffer NR</text>
+  <rect x="420" y="75" width="340" height="180" rx="6" fill="white" stroke="#6a8a7a" stroke-width="1.5"/>
+  <rect x="440" y="95" width="280" height="140" rx="4" fill="#6a8a7a" opacity="0.12" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="580" y="140" text-anchor="middle" font-size="12" fill="#5a5550">Full Frame</text>
+  <text x="580" y="158" text-anchor="middle" font-size="12" fill="#5a5550">in DRAM</text>
+  <rect x="530" y="170" width="100" height="40" rx="4" fill="#6a8a7a" opacity="0.4" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="580" y="195" text-anchor="middle" font-size="10" font-weight="bold" fill="white">任意存取</text>
+  <text x="580" y="248" text-anchor="middle" font-size="10" fill="#8a8580">DRAM: W×H×bit-depth per frame</text>
+
+  <!-- Comparison Table Area -->
+  <rect x="30" y="280" width="720" height="230" rx="6" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <text x="390" y="305" text-anchor="middle" font-size="13" font-weight="bold" fill="#5a5550">關鍵指標比較</text>
+  <line x1="50" y1="315" x2="730" y2="315" stroke="#d5cec7" stroke-width="1"/>
+  <text x="180" y="335" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">指標</text>
+  <text x="390" y="335" text-anchor="middle" font-size="11" font-weight="bold" fill="#6a8a7a">Line Buffer</text>
+  <text x="620" y="335" text-anchor="middle" font-size="11" font-weight="bold" fill="#6a8a7a">Frame Buffer</text>
+  <line x1="50" y1="345" x2="730" y2="345" stroke="#d5cec7" stroke-width="1"/>
+  <text x="180" y="365" text-anchor="middle" font-size="10" fill="#5a5550">Kernel Size</text>
+  <text x="390" y="365" text-anchor="middle" font-size="10" fill="#5a5550">≤ 7×7 ~ 13×13</text>
+  <text x="620" y="365" text-anchor="middle" font-size="10" fill="#5a5550">任意大小 (NLM 21×21+)</text>
+  <text x="180" y="390" text-anchor="middle" font-size="10" fill="#5a5550">Latency</text>
+  <text x="390" y="390" text-anchor="middle" font-size="10" fill="#5a5550">數行 (< 100 μs)</text>
+  <text x="620" y="390" text-anchor="middle" font-size="10" fill="#5a5550">1~2 Frame (16~33 ms)</text>
+  <text x="180" y="415" text-anchor="middle" font-size="10" fill="#5a5550">Memory</text>
+  <text x="390" y="415" text-anchor="middle" font-size="10" fill="#5a5550">On-chip SRAM ~數十 KB</text>
+  <text x="620" y="415" text-anchor="middle" font-size="10" fill="#5a5550">Off-chip DRAM ~數 MB</text>
+  <text x="180" y="440" text-anchor="middle" font-size="10" fill="#5a5550">NR Quality</text>
+  <text x="390" y="440" text-anchor="middle" font-size="10" fill="#5a5550">中等 (local filter)</text>
+  <text x="620" y="440" text-anchor="middle" font-size="10" fill="#5a5550">高 (non-local, large kernel)</text>
+  <text x="180" y="465" text-anchor="middle" font-size="10" fill="#5a5550">Bandwidth</text>
+  <text x="390" y="465" text-anchor="middle" font-size="10" fill="#5a5550">極低 (streaming)</text>
+  <text x="620" y="465" text-anchor="middle" font-size="10" fill="#5a5550">高 (R+W DRAM)</text>
+  <text x="180" y="490" text-anchor="middle" font-size="10" fill="#5a5550">適用場景</text>
+  <text x="390" y="490" text-anchor="middle" font-size="10" fill="#5a5550">Preview / 車用即時</text>
+  <text x="620" y="490" text-anchor="middle" font-size="10" fill="#5a5550">Capture / 高畫質拍照</text>
+</svg>
+<div class="caption">圖 3-13：Line Buffer 與 Frame Buffer 降噪架構比較圖</div>
+</div>
+
+<h3>Line Buffer NR 架構</h3>
+<p>Line Buffer NR 是一種基於 <strong>串流處理（Streaming Processing）</strong>的架構，ISP 只在片上（On-chip）SRAM 中保留有限的幾行像素資料。典型的 Line Buffer NR 為了支援 7×7 的 Kernel，需要至少 6 行的 Line Buffer（當前行 + 上下各 3 行）。</p>
+
+<p>對於一個 4K（3840×2160）、10-bit RAW 的影像串流，每行 Line Buffer 的容量為：</p>
+<div class="formula">Line Buffer Size = Width × Bit-depth = 3840 × 10 bits = 38,400 bits = 4.8 KB/line</div>
+
+<p>7 行 Line Buffer 僅需 <strong>33.6 KB</strong> SRAM，這在晶片上是極為廉價的資源。Line Buffer NR 的優勢在於：</p>
+<ul>
+<li><strong>超低延遲</strong>：僅需等待數行資料進入，延遲通常小於 100 μs，適合即時預覽和車用安全影像。</li>
+<li><strong>無外部記憶體存取</strong>：完全在 On-chip SRAM 內完成，不佔用 DRAM Bandwidth。</li>
+<li><strong>功耗極低</strong>：SRAM 存取的能量約為 DRAM 的 1/100。</li>
+<li><strong>面積可控</strong>：SRAM 面積隨 Line Buffer 行數線性增長。</li>
+</ul>
+
+<p>但 Line Buffer 架構的根本限制是 <strong>Kernel Size 受限</strong>。由於只能看到有限行的上下文，NR 演算法僅限於小型 Local Filter（如 5×5 或 7×7 Bilateral Filter），無法實現 NLM（Non-Local Means）等需要大搜尋範圍的高品質演算法。</p>
+
+<h3>Frame Buffer NR 架構</h3>
+<p>Frame Buffer NR 將整幀影像寫入外部 DRAM，再從 DRAM 讀回進行處理。這提供了對整幀資料的隨機存取能力，可以實現任意大小的 Kernel 和 Non-Local 演算法。</p>
+
+<p>Frame Buffer NR 的記憶體頻寬計算是架構師必須掌握的核心分析：</p>
+<div class="formula">BW = Resolution × Bit-depth × FPS × (Read passes + Write passes)</div>
+
+<p>以 4K 30fps 12-bit RAW 為例，若 NR 需要 1 次讀 + 1 次寫：</p>
+<div class="formula">BW = 3840 × 2160 × 12 × 30 × 2 = 5.97 Gbps ≈ 746 MB/s</div>
+
+<p>如果 NR 還需要讀取參考幀（TNR）或多次 Pass，頻寬將倍增。在系統層面，NR 模組與其他模組（Display、Video Encoder、CPU/GPU）共享 DRAM，頻寬競爭是實際設計中的主要瓶頸。</p>
+
+<div class="info-box key">
+<div class="box-title">重點</div>
+<p>在實際 ISP 晶片設計中，通常採用混合策略：<strong>Preview 路徑使用 Line Buffer NR</strong>（低延遲、低功耗），<strong>Capture 路徑使用 Frame Buffer NR</strong>（高品質）。部分高端 ISP 還會在 Line Buffer NR 中加入行間預測（Inter-line Prediction），在有限的 Buffer 行數內模擬更大 Kernel 的效果。</p>
+</div>
+
+<h3>Buffer Size 與 NR 品質的取捨</h3>
+<p>Line Buffer 的行數直接決定可用的 Vertical Kernel Size。以下是典型的設計取捨：</p>
+<table>
+<tr><th>Line Buffer 行數</th><th>最大 Kernel</th><th>SRAM (4K 12-bit)</th><th>NR 品質</th></tr>
+<tr><td>5 行</td><td>5×5</td><td>28.8 KB</td><td>基礎降噪，紋理保持有限</td></tr>
+<tr><td>7 行</td><td>7×7</td><td>40.3 KB</td><td>中等品質，適合 Preview</td></tr>
+<tr><td>13 行</td><td>13×13</td><td>75.0 KB</td><td>較好品質，面積增大</td></tr>
+<tr><td>21 行</td><td>21×21</td><td>121 KB</td><td>接近 Frame Buffer 品質</td></tr>
+</table>
+
+<p>在行動裝置 ISP 中，7~13 行 Line Buffer 是最常見的設計點。車用 ISP 因為對延遲敏感（ADAS 即時處理），通常傾向更少行數的 Line Buffer 架構。</p>
+
+<div class="info-box tip">
+<div class="box-title">💡 提示</div>
+<p>在估算 DRAM 頻寬需求時，別忘了考慮 <strong>Burst Length</strong> 和 <strong>Bank Conflict</strong> 造成的實際效率損失。典型 LPDDR4/5 的實際利用率約為 70%~85%，需要在理論計算值上加上 20%~40% 的 Margin。另外，NR 模組的存取模式若為不規則的 Block Random Access（如 NLM），DRAM 效率會進一步下降。</p>
+</div>
+`
+    },
+    {
+      id: "ch3_14",
+      title: "NR 硬體實現：定點數運算與量化策略",
+      content: `
+<p>ISP 硬體中的降噪運算全部使用 <strong>定點數（Fixed-point）</strong>來實現，而非浮點數（Floating-point）。這是因為浮點運算單元的面積和功耗遠超定點運算（通常 5~10 倍），且 ISP 的資料路徑本身就是整數像素值。如何在有限的位寬中保持足夠的運算精度，是 NR 硬體設計的核心挑戰。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 780 440" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <rect width="780" height="440" fill="#f5f0eb" rx="8"/>
+  <text x="390" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a5550">定點數 NR Pipeline 位寬標註</text>
+  <defs>
+    <marker id="arrNR14" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6a8a7a"/></marker>
+  </defs>
+
+  <!-- Input -->
+  <rect x="20" y="55" width="100" height="50" rx="6" fill="#6a8a7a" opacity="0.2" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="70" y="77" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">RAW Input</text>
+  <text x="70" y="93" text-anchor="middle" font-size="10" fill="#8a8580">10/12-bit</text>
+  <line x1="120" y1="80" x2="155" y2="80" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR14)"/>
+
+  <!-- Diff Calc -->
+  <rect x="158" y="55" width="110" height="50" rx="6" fill="white" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="213" y="75" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Δ = P_i - P_c</text>
+  <text x="213" y="92" text-anchor="middle" font-size="9" fill="#8a8580">Signed 13-bit</text>
+  <line x1="268" y1="80" x2="303" y2="80" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR14)"/>
+
+  <!-- Range Weight LUT -->
+  <rect x="306" y="45" width="120" height="70" rx="6" fill="white" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="366" y="68" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Range Weight</text>
+  <text x="366" y="83" text-anchor="middle" font-size="10" fill="#5a5550">LUT</text>
+  <text x="366" y="100" text-anchor="middle" font-size="9" fill="#8a8580">Input: |Δ| 8-bit</text>
+  <text x="366" y="112" text-anchor="middle" font-size="9" fill="#8a8580">Output: W 8-bit</text>
+  <line x1="426" y1="80" x2="461" y2="80" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR14)"/>
+
+  <!-- Multiply -->
+  <rect x="464" y="55" width="100" height="50" rx="6" fill="white" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="514" y="75" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">W × P_i</text>
+  <text x="514" y="92" text-anchor="middle" font-size="9" fill="#8a8580">20-bit product</text>
+  <line x1="564" y1="80" x2="599" y2="80" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR14)"/>
+
+  <!-- Accumulate -->
+  <rect x="602" y="55" width="80" height="50" rx="6" fill="white" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="642" y="75" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">ΣW×P</text>
+  <text x="642" y="92" text-anchor="middle" font-size="9" fill="#8a8580">25-bit acc</text>
+
+  <!-- Divide / Normalize -->
+  <line x1="642" y1="105" x2="642" y2="135" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR14)"/>
+  <rect x="592" y="138" width="100" height="50" rx="6" fill="white" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="642" y="158" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">ΣWP / ΣW</text>
+  <text x="642" y="175" text-anchor="middle" font-size="9" fill="#8a8580">Division 25/17-bit</text>
+
+  <!-- Output -->
+  <line x1="642" y1="188" x2="642" y2="218" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR14)"/>
+  <rect x="592" y="221" width="100" height="45" rx="6" fill="#6a8a7a" opacity="0.2" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="642" y="240" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">NR Output</text>
+  <text x="642" y="255" text-anchor="middle" font-size="9" fill="#8a8580">12-bit clipped</text>
+
+  <!-- Bit-width growth annotation -->
+  <rect x="30" y="150" width="520" height="130" rx="6" fill="white" stroke="#d5cec7" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="50" y="175" font-size="12" font-weight="bold" fill="#5a5550">位寬增長分析（7×7 Bilateral Filter, 12-bit input）</text>
+  <text x="50" y="198" font-size="10" fill="#5a5550">• 差值 Δ: signed → 12+1 = 13 bits</text>
+  <text x="50" y="215" font-size="10" fill="#5a5550">• 權重 × 像素: 8 + 12 = 20 bits per product</text>
+  <text x="50" y="232" font-size="10" fill="#5a5550">• 累加 49 個乘積: 20 + ceil(log₂49) = 20+6 = 26 bits</text>
+  <text x="50" y="249" font-size="10" fill="#5a5550">• 權重累加 ΣW: 8 + 6 = 14 bits → 除法器 26/14 bits</text>
+  <text x="50" y="266" font-size="10" fill="#5a5550">• 最終輸出: clip 至 12-bit unsigned</text>
+
+  <!-- Quantization Error Box -->
+  <rect x="30" y="300" width="720" height="120" rx="6" fill="#fff3e0" stroke="#e8a04a" stroke-width="1"/>
+  <text x="50" y="325" font-size="12" font-weight="bold" fill="#e8a04a">⚠ 量化誤差累積示範</text>
+  <text x="50" y="348" font-size="10" fill="#5a5550">Pass 1: input 12-bit → 計算精度 26-bit → 截斷至 12-bit → 量化誤差 ε₁ ≤ 0.5 LSB</text>
+  <text x="50" y="368" font-size="10" fill="#5a5550">Pass 2: input 12-bit+ε₁ → 計算精度 26-bit → 截斷至 12-bit → 累積誤差 ε₁+ε₂ ≤ 1.0 LSB</text>
+  <text x="50" y="388" font-size="10" fill="#5a5550">Pass N: 累積誤差最大可達 N × 0.5 LSB → 對低對比度區域可能造成可見 artifact</text>
+  <text x="50" y="410" font-size="10" font-weight="bold" fill="#e8a04a">解決方案: 中間結果保持高位寬 (14~16 bit)，僅在最終輸出時截斷</text>
+</svg>
+<div class="caption">圖 3-14：定點數 Bilateral Filter Pipeline 位寬分析示意圖</div>
+</div>
+
+<h3>定點數 vs 浮點數的取捨</h3>
+<p>在 ISP 硬體中，浮點運算（FP16/FP32）的代價極為昂貴。一個 FP32 乘法器的面積約為 INT16 乘法器的 8~10 倍，功耗差距也類似。由於 ISP Pipeline 需要在每個像素、每個 Clock Cycle 進行大量並行乘加運算，使用浮點數會導致面積和功耗爆炸。因此，ISP 中的 NR 運算全部採用整數定點數實現。</p>
+
+<p>定點數設計的關鍵在於<strong>位寬規劃（Bit-width Planning）</strong>。位寬太窄會引入量化誤差，位寬太寬會浪費面積。典型策略是：</p>
+<ul>
+<li><strong>輸入位寬</strong>：與 Sensor 位深一致（10/12/14-bit）</li>
+<li><strong>中間計算位寬</strong>：根據運算類型逐級分析增長，保持完整精度不截斷</li>
+<li><strong>係數位寬</strong>：8~10-bit 通常足夠（256~1024 級量化精度）</li>
+<li><strong>輸出位寬</strong>：與 Pipeline 下一級的輸入位寬匹配</li>
+</ul>
+
+<h3>LUT 近似複雜函數</h3>
+<p>NR 演算法中經常需要計算 exp()、sqrt()、1/x 等非線性函數。在硬體中，這些函數無法直接實現，通常使用 <strong>Look-up Table（LUT）</strong>進行近似：</p>
+
+<div class="info-box example">
+<div class="box-title">📝 範例</div>
+<p>Bilateral Filter 的 Range Weight 為 W(Δ) = exp(−Δ²/2σ²)。硬體實現方式：</p>
+<pre>
+// 預先計算 LUT（軟體端）
+for (int d = 0; d < 256; d++) {
+    float delta = d / 255.0 * max_range;
+    range_lut[d] = (uint8_t)(exp(-delta*delta/(2*sigma*sigma)) * 255);
+}
+// 硬體端：用 |Δ| 的高位作為 LUT index
+wire [7:0] lut_idx = (abs_delta > 255) ? 8'd255 : abs_delta[7:0];
+wire [7:0] range_weight = range_lut[lut_idx];
+</pre>
+<p>LUT 大小僅 256 × 8-bit = 256 Bytes，可輕鬆放入 SRAM 或 Register File。</p>
+</div>
+
+<p>對於需要更高精度的場景，可使用 <strong>分段線性插值（Piece-wise Linear Interpolation）</strong>：將函數區間分為 N 段，每段儲存斜率和截距，用一次乘法+一次加法完成插值。16 段分段線性通常能達到 10-bit 以上的近似精度。</p>
+
+<h3>量化誤差分析與 Bit-Accurate Simulation</h3>
+<p>在 NR 硬體開發流程中，<strong>Bit-Accurate Simulation（位精確模擬）</strong>是驗證定點實現是否正確的關鍵步驟。流程如下：</p>
+<ol>
+<li>用浮點數實現演算法的 Golden Model（參考模型）</li>
+<li>用定點數重新實現，逐級模擬位寬截斷和四捨五入</li>
+<li>比較兩者的輸出差異，計算 MSE 和最大誤差</li>
+<li>若誤差超出規格（通常要求 MSE < 0.5 LSB²），增加中間位寬或改進四捨五入策略</li>
+</ol>
+
+<div class="info-box warn">
+<div class="box-title">⚠️ 注意</div>
+<p>多 Pass NR 的量化誤差會累積。若 2D NR 和 TNR 各引入最多 0.5 LSB 的誤差，串聯後最大誤差可達 1.0 LSB。在 10-bit Pipeline 中這是 1/1024，通常可接受；但在 8-bit Pipeline 中是 1/256，在平坦的漸層區域可能造成可見的 Banding Artifact。建議中間 Pass 使用比輸入/輸出更寬的位數（如 12-bit 輸入時，中間結果保持 14~16-bit）。</p>
+</div>
+
+<h3>除法器的硬體實現</h3>
+<p>Bilateral Filter 需要計算 ΣWP/ΣW，除法在硬體中非常昂貴（面積是乘法器的 3~5 倍）。常見的優化策略包括：</p>
+<ul>
+<li><strong>倒數 LUT</strong>：預計算 1/ΣW 的 LUT，將除法轉為乘法</li>
+<li><strong>Newton-Raphson 迭代</strong>：用 2~3 次迭代逼近倒數</li>
+<li><strong>Shift-and-Subtract</strong>：傳統除法器，延遲較大但面積可控</li>
+<li><strong>權重歸一化</strong>：設計時確保 ΣW 為 2 的冪次方，除法退化為移位（Shift）</li>
+</ul>
+
+<p>在實際 ISP 設計中，由於 Bilateral Filter 的 ΣW 值不固定，最常見的做法是使用倒數 LUT + 乘法器的組合，用 256-entry 的 LUT 儲存倒數值，僅增加一個乘法器的面積。</p>
+`
+    },
+    {
+      id: "ch3_15",
+      title: "2D NR 硬體引擎：Bilateral Filter 的 VLSI 實現",
+      content: `
+<p>Bilateral Filter 是 ISP 中最常用的 2D 空間域降噪演算法。其核心思想是結合<strong>空間距離權重（Spatial Weight）</strong>和<strong>像素值差異權重（Range Weight）</strong>，在平滑噪聲的同時保持邊緣。本節深入探討其在 VLSI（超大型積體電路）中的硬體實現架構。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 780 500" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <rect width="780" height="500" fill="#f5f0eb" rx="8"/>
+  <text x="390" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a5550">Bilateral Filter 硬體 Pipeline 架構</text>
+  <defs>
+    <marker id="arrNR15" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6a8a7a"/></marker>
+  </defs>
+
+  <!-- Stage 1: Line Buffer -->
+  <rect x="20" y="50" width="130" height="80" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="85" y="72" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">Stage 1</text>
+  <text x="85" y="88" text-anchor="middle" font-size="10" fill="#5a5550">Line Buffer</text>
+  <text x="85" y="104" text-anchor="middle" font-size="10" fill="#5a5550">7-line SRAM</text>
+  <text x="85" y="118" text-anchor="middle" font-size="9" fill="#8a8580">1 cycle latency</text>
+  <line x1="150" y1="90" x2="175" y2="90" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR15)"/>
+
+  <!-- Stage 2: Window Generator -->
+  <rect x="178" y="50" width="130" height="80" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="243" y="72" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">Stage 2</text>
+  <text x="243" y="88" text-anchor="middle" font-size="10" fill="#5a5550">Window Gen</text>
+  <text x="243" y="104" text-anchor="middle" font-size="10" fill="#5a5550">7×7 = 49 pixels</text>
+  <text x="243" y="118" text-anchor="middle" font-size="9" fill="#8a8580">parallel output</text>
+  <line x1="308" y1="90" x2="333" y2="90" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR15)"/>
+
+  <!-- Stage 3: Diff Calc -->
+  <rect x="336" y="50" width="130" height="80" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="401" y="72" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">Stage 3</text>
+  <text x="401" y="88" text-anchor="middle" font-size="10" fill="#5a5550">|P_i − P_c|</text>
+  <text x="401" y="104" text-anchor="middle" font-size="10" fill="#5a5550">49 subtractors</text>
+  <text x="401" y="118" text-anchor="middle" font-size="9" fill="#8a8580">1 cycle</text>
+  <line x1="466" y1="90" x2="491" y2="90" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR15)"/>
+
+  <!-- Stage 4: LUT -->
+  <rect x="494" y="50" width="130" height="80" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="559" y="72" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">Stage 4</text>
+  <text x="559" y="88" text-anchor="middle" font-size="10" fill="#5a5550">Range LUT ×49</text>
+  <text x="559" y="104" text-anchor="middle" font-size="10" fill="#5a5550">+ Spatial Coeff</text>
+  <text x="559" y="118" text-anchor="middle" font-size="9" fill="#8a8580">1 cycle</text>
+  <line x1="624" y1="90" x2="649" y2="90" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR15)"/>
+
+  <!-- Stage 5: MAC -->
+  <rect x="652" y="50" width="110" height="80" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="707" y="72" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">Stage 5</text>
+  <text x="707" y="88" text-anchor="middle" font-size="10" fill="#5a5550">MAC Tree</text>
+  <text x="707" y="104" text-anchor="middle" font-size="10" fill="#5a5550">ΣW×P, ΣW</text>
+  <text x="707" y="118" text-anchor="middle" font-size="9" fill="#8a8580">3 cycles (tree)</text>
+
+  <!-- Stage 6: Divide -->
+  <line x1="707" y1="130" x2="707" y2="160" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR15)"/>
+  <rect x="652" y="163" width="110" height="55" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="707" y="185" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">Stage 6</text>
+  <text x="707" y="202" text-anchor="middle" font-size="10" fill="#5a5550">Div (LUT+MUL)</text>
+  <text x="707" y="214" text-anchor="middle" font-size="9" fill="#8a8580">2 cycles</text>
+
+  <!-- Total Latency -->
+  <rect x="20" y="155" width="610" height="35" rx="4" fill="#6a8a7a" opacity="0.1" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="325" y="177" text-anchor="middle" font-size="11" font-weight="bold" fill="#6a8a7a">Total Pipeline Latency: 1+1+1+1+3+2 = 9 cycles + Line Buffer fill</text>
+
+  <!-- Parallel Architecture Below -->
+  <text x="390" y="230" text-anchor="middle" font-size="14" font-weight="bold" fill="#5a5550">多像素並行處理架構（4 pixels/cycle）</text>
+
+  <rect x="20" y="245" width="740" height="230" rx="6" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <!-- Lane 0 -->
+  <rect x="40" y="260" width="160" height="40" rx="4" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="120" y="285" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Lane 0: Pixel(x)</text>
+  <!-- Lane 1 -->
+  <rect x="220" y="260" width="160" height="40" rx="4" fill="#6a8a7a" opacity="0.2" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="300" y="285" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Lane 1: Pixel(x+1)</text>
+  <!-- Lane 2 -->
+  <rect x="400" y="260" width="160" height="40" rx="4" fill="#6a8a7a" opacity="0.25" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="480" y="285" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Lane 2: Pixel(x+2)</text>
+  <!-- Lane 3 -->
+  <rect x="580" y="260" width="160" height="40" rx="4" fill="#6a8a7a" opacity="0.3" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="660" y="285" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Lane 3: Pixel(x+3)</text>
+
+  <!-- Shared resources -->
+  <rect x="40" y="320" width="700" height="40" rx="4" fill="#6a8a7a" opacity="0.08" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="390" y="345" text-anchor="middle" font-size="11" fill="#5a5550">Shared Line Buffer (read 4+6 = 10 pixels/cycle from 7 rows)</text>
+
+  <rect x="40" y="375" width="700" height="40" rx="4" fill="#6a8a7a" opacity="0.08" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="390" y="400" text-anchor="middle" font-size="11" fill="#5a5550">Shared Range LUT (multi-port or time-multiplexed)</text>
+
+  <!-- Throughput -->
+  <text x="390" y="445" text-anchor="middle" font-size="11" fill="#8a8580">Throughput: 4 pixels/cycle → 4K@30fps 需要 Clock ≥ 3840×2160×30/4 ≈ 62 MHz</text>
+  <text x="390" y="465" text-anchor="middle" font-size="11" fill="#8a8580">實際 ISP Clock 通常 400~600 MHz → 可處理更高解析度或更高幀率</text>
+</svg>
+<div class="caption">圖 3-15：Bilateral Filter 硬體 Pipeline 及多像素並行架構圖</div>
+</div>
+
+<h3>Hardware-Friendly Bilateral Filter 近似</h3>
+<p>標準 Bilateral Filter 的公式為：</p>
+<div class="formula">BF(p) = (1/W_p) × Σ G_σs(||p−q||) × G_σr(|I(p)−I(q)|) × I(q)</div>
+
+<p>其中 G_σs 是空間高斯權重，G_σr 是值域高斯權重。在硬體實現中，有幾個重要的簡化和近似：</p>
+<ul>
+<li><strong>空間權重固定化</strong>：G_σs 對於固定的 Kernel Size 是常數矩陣，可預先計算並存為 ROM 係數。7×7 Kernel 只需 49 個固定係數。</li>
+<li><strong>值域權重 LUT 化</strong>：G_σr(Δ) = exp(−Δ²/2σ²) 用 256-entry LUT 取代指數和平方運算。</li>
+<li><strong>組合權重</strong>：最終權重 W = S × R，其中 S 是空間係數（8-bit），R 是值域 LUT 輸出（8-bit），乘積為 16-bit。</li>
+</ul>
+
+<h3>Pipeline 各級詳細設計</h3>
+<p><strong>Stage 1 - Line Buffer</strong>：使用 Dual-port SRAM 實現，每行一個 Bank。新進的像素寫入當前行 Buffer，同時讀出所有 7 行對應位置的像素。對於 4-pixel/cycle 的並行度，需要每 Cycle 讀出 7 行 × (4+6) 列 = 70 個像素（4 個中心像素各需要左右 3 個 Neighbor）。</p>
+
+<p><strong>Stage 2 - Window Generator</strong>：將 Line Buffer 輸出整理為 4 組 7×7 Window。相鄰像素的 Window 有大量重疊（相鄰兩個 7×7 Window 共享 7×6 = 42 個像素），利用 Shift Register 避免重複讀取。</p>
+
+<p><strong>Stage 3 - Difference Calculator</strong>：49 個並行減法器計算 |P_i − P_center|。這是面積最大的 Stage 之一，每個 Lane 需要 49 個 12-bit 減法器和絕對值電路。</p>
+
+<p><strong>Stage 4 - Weight Calculation</strong>：Range LUT 查表 + Spatial 係數乘法。若 4 Lane 共享一份 LUT，需要 4×49 = 196 次查表/cycle。實務上常使用多份 LUT 副本或多 Port SRAM 來達成。</p>
+
+<p><strong>Stage 5 - MAC Tree</strong>：使用 Adder Tree 累加 49 個加權像素值。49 個 20-bit 值的加法樹深度為 ceil(log₂49) = 6 層，但可透過 Pipeline 拆分為 2~3 個 Clock Cycle。</p>
+
+<h3>面積/功耗估算</h3>
+<table>
+<tr><th>Kernel Size</th><th>乘法器數量（每 Lane）</th><th>加法器數量</th><th>LUT 大小</th><th>相對面積</th></tr>
+<tr><td>5×5</td><td>25</td><td>~50</td><td>256B</td><td>1.0×</td></tr>
+<tr><td>7×7</td><td>49</td><td>~100</td><td>256B</td><td>1.9×</td></tr>
+<tr><td>9×9</td><td>81</td><td>~160</td><td>256B</td><td>3.1×</td></tr>
+</table>
+
+<div class="info-box key">
+<div class="box-title">重點</div>
+<p>在實際 ISP 產品中，7×7 是最常見的 Bilateral Filter Kernel Size，它在降噪品質和硬體成本之間達到了良好的平衡。9×9 在高端 ISP 中偶見使用，但面積增加超過 50%。如果需要更大的有效 Kernel，通常改用多 Pass 策略（例如兩次 5×5 等效於一次較大 Kernel 的效果），或改用 Frame Buffer + NLM 架構。</p>
+</div>
+
+<div class="info-box tip">
+<div class="box-title">💡 提示</div>
+<p>在 VLSI 設計中，乘法器的面積遠大於加法器（約 4~8 倍）。因此，NR 引擎的面積主要由乘法器數量決定。一個常見的優化是將空間權重和值域權重合併為一個 LUT（Joint LUT），直接輸出組合權重，省去一級乘法。另外，對於對稱的空間權重，可以利用 4 路對稱性將 49 個獨立權重降為 13 個唯一值。</p>
+</div>
+`
+    },
+    {
+      id: "ch3_16",
+      title: "3D TNR 硬體實現與 Motion Estimation",
+      content: `
+<p>時域降噪（Temporal Noise Reduction, TNR）利用相鄰幀之間的時間冗餘來降低噪聲。3D TNR 是手機和車用 ISP 中最重要的降噪技術之一，其硬體實現涉及 Motion Estimation（運動估計）、參考幀管理、以及 Motion-Adaptive 融合等多個複雜模組。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 780 530" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <rect width="780" height="530" fill="#f5f0eb" rx="8"/>
+  <text x="390" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a5550">3D TNR 硬體架構 Pipeline</text>
+  <defs>
+    <marker id="arrNR16" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6a8a7a"/></marker>
+    <marker id="arrNR16r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#d35050"/></marker>
+  </defs>
+
+  <!-- Current Frame Input -->
+  <rect x="20" y="60" width="120" height="50" rx="6" fill="#6a8a7a" opacity="0.2" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="80" y="82" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">Current Frame</text>
+  <text x="80" y="98" text-anchor="middle" font-size="9" fill="#8a8580">Frame N</text>
+
+  <!-- Reference Frame -->
+  <rect x="20" y="180" width="120" height="50" rx="6" fill="#6a8a7a" opacity="0.2" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="80" y="202" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">Reference Frame</text>
+  <text x="80" y="218" text-anchor="middle" font-size="9" fill="#8a8580">Frame N-1 (DRAM)</text>
+
+  <!-- ME Engine -->
+  <line x1="140" y1="85" x2="185" y2="130" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR16)"/>
+  <line x1="140" y1="205" x2="185" y2="155" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR16)"/>
+  <rect x="188" y="110" width="140" height="70" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="258" y="135" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">Motion Estimation</text>
+  <text x="258" y="153" text-anchor="middle" font-size="10" fill="#5a5550">Block Matching</text>
+  <text x="258" y="168" text-anchor="middle" font-size="9" fill="#8a8580">SAD / SSD Engine</text>
+
+  <!-- MV Output -->
+  <line x1="328" y1="145" x2="370" y2="145" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR16)"/>
+  <rect x="373" y="120" width="100" height="50" rx="6" fill="white" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="423" y="142" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Motion Vector</text>
+  <text x="423" y="158" text-anchor="middle" font-size="9" fill="#8a8580">MV(dx, dy)</text>
+
+  <!-- Motion Compensate -->
+  <line x1="140" y1="205" x2="510" y2="205" stroke="#6a8a7a" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <line x1="473" y1="145" x2="520" y2="190" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR16)"/>
+  <rect x="523" y="175" width="130" height="55" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="588" y="198" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Motion Compensate</text>
+  <text x="588" y="215" text-anchor="middle" font-size="9" fill="#8a8580">Ref[x+dx, y+dy]</text>
+
+  <!-- Alpha Calc -->
+  <line x1="423" y1="170" x2="423" y2="270" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR16)"/>
+  <rect x="370" y="273" width="110" height="55" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="425" y="296" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Alpha Calc</text>
+  <text x="425" y="313" text-anchor="middle" font-size="9" fill="#8a8580">f(|MV|, SAD)</text>
+
+  <!-- Blending -->
+  <line x1="140" y1="85" x2="620" y2="85" stroke="#6a8a7a" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <line x1="620" y1="85" x2="620" y2="330" stroke="#6a8a7a" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <line x1="653" y1="205" x2="685" y2="350" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR16)"/>
+  <line x1="620" y1="340" x2="685" y2="365" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR16)"/>
+  <line x1="480" y1="300" x2="685" y2="360" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR16)"/>
+
+  <rect x="688" y="335" width="80" height="60" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="728" y="358" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Blend</text>
+  <text x="728" y="375" text-anchor="middle" font-size="8" fill="#8a8580">α·Cur +</text>
+  <text x="728" y="387" text-anchor="middle" font-size="8" fill="#8a8580">(1−α)·MC_Ref</text>
+
+  <!-- Output -->
+  <line x1="728" y1="395" x2="728" y2="425" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR16)"/>
+  <rect x="668" y="428" width="100" height="40" rx="6" fill="#6a8a7a" opacity="0.2" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="718" y="448" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">TNR Output</text>
+  <text x="718" y="462" text-anchor="middle" font-size="9" fill="#8a8580">→ 更新 Ref Frame</text>
+
+  <!-- Feedback loop -->
+  <path d="M 668 448 Q 30 500 30 205 L 20 205" stroke="#d35050" stroke-width="1.5" fill="none" stroke-dasharray="5,3" marker-end="url(#arrNR16r)"/>
+  <text x="200" y="490" font-size="10" fill="#d35050">Reference Frame Update (write back to DRAM)</text>
+
+  <!-- Memory bandwidth annotation -->
+  <rect x="20" y="260" width="330" height="90" rx="4" fill="#fff3e0" stroke="#e8a04a" stroke-width="1"/>
+  <text x="40" y="280" font-size="10" font-weight="bold" fill="#e8a04a">DRAM Bandwidth (4K 30fps 12-bit):</text>
+  <text x="40" y="298" font-size="9" fill="#5a5550">Read Ref Frame: 3840×2160×12×30 = 2.99 Gbps</text>
+  <text x="40" y="312" font-size="9" fill="#5a5550">Read Search Window (±16): ×4~9 = 12~27 Gbps</text>
+  <text x="40" y="326" font-size="9" fill="#5a5550">Write Updated Ref: 2.99 Gbps</text>
+  <text x="40" y="340" font-size="9" font-weight="bold" fill="#e8a04a">Total: 18~33 Gbps (TNR 是 ISP 最大 BW 消費者)</text>
+</svg>
+<div class="caption">圖 3-16：3D TNR 硬體 Pipeline 架構圖，含 ME 引擎與參考幀回寫</div>
+</div>
+
+<h3>Motion Estimation 硬體引擎</h3>
+<p>Motion Estimation（ME）是 TNR 中計算量最大的模組。其目標是為每個 Block（通常 8×8 或 16×16）找到在參考幀中的最佳匹配位置。硬體 ME 通常使用 <strong>Block Matching</strong> 演算法：</p>
+
+<p><strong>SAD（Sum of Absolute Differences）</strong>是最常見的匹配準則：</p>
+<div class="formula">SAD(dx, dy) = Σ|Cur(x+i, y+j) − Ref(x+i+dx, y+j+dy)|, i,j ∈ Block</div>
+
+<p>對於 8×8 Block、搜尋範圍 ±16，需要計算 33×33 = 1089 個候選位置的 SAD，每個 SAD 包含 64 次減法和絕對值累加。硬體實現策略包括：</p>
+<ul>
+<li><strong>全搜尋（Full Search）</strong>：品質最好但計算量最大。可透過大量並行化在合理面積內實現。</li>
+<li><strong>三步搜尋（Three-Step Search）</strong>：從大步長開始，逐漸細化。計算量降為 ~25 SAD，但可能錯過全局最優。</li>
+<li><strong>菱形搜尋（Diamond Search）</strong>：在小步長菱形圖案中搜尋，計算量和品質介於前兩者之間。</li>
+</ul>
+
+<h3>Recursive IIR Temporal Filter</h3>
+<p>TNR 最常見的融合方式是 Recursive IIR Filter：</p>
+<div class="formula">Out(n) = α × Cur(n) + (1−α) × MC_Ref(n−1)</div>
+
+<p>其中 MC_Ref 是 Motion Compensated 後的參考幀，α 是融合權重（0 < α ≤ 1）。這個 IIR 結構意味著輸出實際上是所有歷史幀的加權平均，等效時間常數為 1/α 幀。例如 α = 0.2 時，等效平均了 ~5 幀的資訊。</p>
+
+<h3>Motion-Adaptive Alpha</h3>
+<p>α 值必須根據運動狀態自適應調整：</p>
+<ul>
+<li><strong>靜態區域（|MV| ≈ 0, SAD 低）</strong>：α → 小值（0.1~0.2），強時域平均，降噪效果最大</li>
+<li><strong>運動區域（|MV| 大, SAD 高）</strong>：α → 大值（0.8~1.0），弱時域平均，避免 Ghost Artifact</li>
+<li><strong>場景切換</strong>：α = 1.0，完全不做時域融合，避免新舊場景交疊</li>
+</ul>
+
+<div class="info-box warn">
+<div class="box-title">⚠️ 注意</div>
+<p><strong>Ghost Artifact（鬼影）</strong>是 TNR 最常見的 Artifact。當 ME 未能正確檢測運動時（例如非剛體運動、低紋理區域的錯誤匹配），參考幀中的殘影會被融合到輸出中。硬體 Ghost Detection 的常見做法是：計算融合後像素與原始像素的差異，若差異超過閾值則降低該像素的時域融合比例（增大 α）。這需要額外的一個比較器和 Mux。</p>
+</div>
+
+<h3>MV Memory Management</h3>
+<p>ME 輸出的 Motion Vector 需要儲存供 Motion Compensation 使用。對於 4K 影像、8×8 Block Size：</p>
+<div class="formula">MV 數量 = (3840/8) × (2160/8) = 480 × 270 = 129,600 個 MV</div>
+<div class="formula">MV 大小 = 2 × 6-bit（dx, dy 各 ±32）= 12 bits/MV</div>
+<div class="formula">MV Buffer = 129,600 × 12 / 8 = 194.4 KB</div>
+
+<p>這個 MV Buffer 通常放在 On-chip SRAM 中（約 200 KB），因為 MV 的存取模式是順序寫入、隨機讀取，且頻寬需求適中。</p>
+
+<div class="info-box tip">
+<div class="box-title">💡 提示</div>
+<p>在實際 ISP 中，TNR 通常是整個系統中最大的 DRAM 頻寬消費者，因為它需要讀取和寫入完整的參考幀。降低 TNR 頻寬的常見技巧包括：(1) 降低參考幀位深（如 12-bit → 8-bit 壓縮）、(2) 使用 Lossy Frame Compression（如 AFBC, UBWC）壓縮參考幀、(3) 降低 ME 搜尋範圍、(4) 使用 Tile-based 處理減少 Random Access。這些技巧可以將 TNR 的 DRAM 頻寬降低 30%~60%。</p>
+</div>
+`
+    },
+    {
+      id: "ch3_17",
+      title: "多通道 NR：Bayer Domain vs YUV Domain 硬體 Pipeline",
+      content: `
+<p>在 ISP Pipeline 中，降噪可以在不同的處理階段進行：<strong>Bayer Domain（RAW Domain）</strong>在 Demosaic 之前、<strong>YUV Domain（RGB Domain）</strong>在 Demosaic 之後。兩者各有優勢，現代高階 ISP 通常採用兩者結合的<strong>雙重降噪（Dual-NR）</strong>策略。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 780 480" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <rect width="780" height="480" fill="#f5f0eb" rx="8"/>
+  <text x="390" y="25" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a5550">ISP Pipeline 中 NR 插入點與資料流</text>
+  <defs>
+    <marker id="arrNR17" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6a8a7a"/></marker>
+  </defs>
+
+  <!-- Full Pipeline -->
+  <!-- Sensor -->
+  <rect x="20" y="55" width="85" height="40" rx="5" fill="#6a8a7a" opacity="0.3" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="62" y="80" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Sensor</text>
+  <line x1="105" y1="75" x2="130" y2="75" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR17)"/>
+
+  <!-- BLC -->
+  <rect x="133" y="55" width="60" height="40" rx="5" fill="white" stroke="#8a8580" stroke-width="1"/>
+  <text x="163" y="78" text-anchor="middle" font-size="9" fill="#5a5550">BLC</text>
+  <line x1="193" y1="75" x2="218" y2="75" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR17)"/>
+
+  <!-- Bayer NR -->
+  <rect x="221" y="45" width="100" height="60" rx="6" fill="#e8eaf6" stroke="#5060b0" stroke-width="2"/>
+  <text x="271" y="68" text-anchor="middle" font-size="10" font-weight="bold" fill="#5060b0">RAW NR</text>
+  <text x="271" y="83" text-anchor="middle" font-size="9" fill="#5060b0">Bayer Domain</text>
+  <text x="271" y="97" text-anchor="middle" font-size="8" fill="#8a8580">1 channel</text>
+  <line x1="321" y1="75" x2="346" y2="75" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR17)"/>
+
+  <!-- Demosaic -->
+  <rect x="349" y="55" width="85" height="40" rx="5" fill="white" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="391" y="78" text-anchor="middle" font-size="9" font-weight="bold" fill="#5a5550">Demosaic</text>
+  <line x1="434" y1="75" x2="459" y2="75" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR17)"/>
+
+  <!-- CCM -->
+  <rect x="462" y="55" width="60" height="40" rx="5" fill="white" stroke="#8a8580" stroke-width="1"/>
+  <text x="492" y="78" text-anchor="middle" font-size="9" fill="#5a5550">CCM</text>
+  <line x1="522" y1="75" x2="547" y2="75" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR17)"/>
+
+  <!-- RGB2YUV -->
+  <rect x="550" y="55" width="70" height="40" rx="5" fill="white" stroke="#8a8580" stroke-width="1"/>
+  <text x="585" y="78" text-anchor="middle" font-size="9" fill="#5a5550">RGB→YUV</text>
+  <line x1="620" y1="75" x2="645" y2="75" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR17)"/>
+
+  <!-- YUV NR -->
+  <rect x="648" y="45" width="110" height="60" rx="6" fill="#fff3e0" stroke="#e8a04a" stroke-width="2"/>
+  <text x="703" y="68" text-anchor="middle" font-size="10" font-weight="bold" fill="#e8a04a">YUV NR</text>
+  <text x="703" y="83" text-anchor="middle" font-size="9" fill="#e8a04a">Y + UV 分離</text>
+  <text x="703" y="97" text-anchor="middle" font-size="8" fill="#8a8580">3 channels</text>
+
+  <!-- Bayer Domain Detail -->
+  <rect x="20" y="130" width="360" height="165" rx="6" fill="white" stroke="#5060b0" stroke-width="1.5"/>
+  <text x="200" y="152" text-anchor="middle" font-size="12" font-weight="bold" fill="#5060b0">Bayer Domain NR 特點</text>
+  <line x1="40" y1="160" x2="360" y2="160" stroke="#d5cec7" stroke-width="1"/>
+
+  <!-- Bayer pattern -->
+  <rect x="40" y="170" width="30" height="25" rx="2" fill="#a0d0a0" stroke="#6a8a7a" stroke-width="1"/><text x="55" y="187" text-anchor="middle" font-size="9" fill="#5a5550">Gr</text>
+  <rect x="70" y="170" width="30" height="25" rx="2" fill="#d0a0a0" stroke="#6a8a7a" stroke-width="1"/><text x="85" y="187" text-anchor="middle" font-size="9" fill="#5a5550">R</text>
+  <rect x="100" y="170" width="30" height="25" rx="2" fill="#a0d0a0" stroke="#6a8a7a" stroke-width="1"/><text x="115" y="187" text-anchor="middle" font-size="9" fill="#5a5550">Gr</text>
+  <rect x="40" y="195" width="30" height="25" rx="2" fill="#a0a0d0" stroke="#6a8a7a" stroke-width="1"/><text x="55" y="212" text-anchor="middle" font-size="9" fill="#5a5550">B</text>
+  <rect x="70" y="195" width="30" height="25" rx="2" fill="#a0d0a0" stroke="#6a8a7a" stroke-width="1"/><text x="85" y="212" text-anchor="middle" font-size="9" fill="#5a5550">Gb</text>
+  <rect x="100" y="195" width="30" height="25" rx="2" fill="#a0a0d0" stroke="#6a8a7a" stroke-width="1"/><text x="115" y="212" text-anchor="middle" font-size="9" fill="#5a5550">B</text>
+
+  <text x="155" y="185" font-size="10" fill="#5a5550">✓ 單通道操作，面積小</text>
+  <text x="155" y="202" font-size="10" fill="#5a5550">✓ 噪聲最純粹（未經處理）</text>
+  <text x="155" y="219" font-size="10" fill="#5a5550">✓ 避免 Demosaic 放大噪聲</text>
+  <text x="40" y="245" font-size="10" fill="#d35050">✗ 空間解析度低（每色 1/4 pixel）</text>
+  <text x="40" y="262" font-size="10" fill="#d35050">✗ 跨色資訊不可用</text>
+  <text x="40" y="279" font-size="10" fill="#d35050">✗ Kernel 有效範圍在原圖上間隔取樣</text>
+
+  <!-- YUV Domain Detail -->
+  <rect x="400" y="130" width="360" height="165" rx="6" fill="white" stroke="#e8a04a" stroke-width="1.5"/>
+  <text x="580" y="152" text-anchor="middle" font-size="12" font-weight="bold" fill="#e8a04a">YUV Domain NR 特點</text>
+  <line x1="420" y1="160" x2="740" y2="160" stroke="#d5cec7" stroke-width="1"/>
+
+  <rect x="420" y="170" width="90" height="22" rx="3" fill="#e0e0e0" stroke="#8a8580" stroke-width="1"/><text x="465" y="186" text-anchor="middle" font-size="9" font-weight="bold" fill="#5a5550">Y (Luma)</text>
+  <rect x="420" y="195" width="45" height="22" rx="3" fill="#a0c0e0" stroke="#8a8580" stroke-width="1"/><text x="442" y="211" text-anchor="middle" font-size="9" fill="#5a5550">Cb</text>
+  <rect x="470" y="195" width="45" height="22" rx="3" fill="#e0b0b0" stroke="#8a8580" stroke-width="1"/><text x="492" y="211" text-anchor="middle" font-size="9" fill="#5a5550">Cr</text>
+
+  <text x="535" y="185" font-size="10" fill="#5a5550">✓ 全解析度 Luma 降噪</text>
+  <text x="535" y="202" font-size="10" fill="#5a5550">✓ Chroma 可強力降噪</text>
+  <text x="535" y="219" font-size="10" fill="#5a5550">✓ 人眼對色彩噪聲更敏感</text>
+  <text x="420" y="245" font-size="10" fill="#d35050">✗ 3 通道 → 3× 計算量和頻寬</text>
+  <text x="420" y="262" font-size="10" fill="#d35050">✗ Demosaic 已放大/擴散噪聲</text>
+  <text x="420" y="279" font-size="10" fill="#d35050">✗ 噪聲統計特性已改變</text>
+
+  <!-- Best Practice -->
+  <rect x="20" y="310" width="740" height="155" rx="6" fill="#6a8a7a" opacity="0.08" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="390" y="335" text-anchor="middle" font-size="13" font-weight="bold" fill="#6a8a7a">業界最佳實踐：雙重 NR Pipeline</text>
+  <text x="40" y="360" font-size="11" fill="#5a5550">Stage 1 (RAW NR): 輕度 Bilateral Filter → 去除 Bayer 噪聲，保持紋理</text>
+  <text x="40" y="380" font-size="11" fill="#5a5550">Stage 2 (Demosaic): 噪聲已降低 → Demosaic 品質提升，偽色/鋸齒減少</text>
+  <text x="40" y="400" font-size="11" fill="#5a5550">Stage 3 (YUV NR-Y): 中度 Luma 降噪 → 進一步降低亮度噪聲，保持邊緣</text>
+  <text x="40" y="420" font-size="11" fill="#5a5550">Stage 4 (YUV NR-C): 強力 Chroma 降噪 → 大幅去除色彩噪聲（人眼不敏感於色彩細節）</text>
+  <text x="40" y="445" font-size="11" font-weight="bold" fill="#6a8a7a">總降噪效果 ≈ RAW NR × YUV NR（分貝相加），且各級 Artifact 風險分散</text>
+</svg>
+<div class="caption">圖 3-17：ISP Pipeline 中 Bayer Domain 與 YUV Domain 雙重 NR 架構</div>
+</div>
+
+<h3>Bayer Domain NR 的硬體考量</h3>
+<p>在 Bayer Domain 進行 NR 時，由於 Bayer Pattern 的排列（RGGB），每個顏色通道的像素在空間上是<strong>間隔取樣</strong>的。對 R 通道做 5×5 NR，實際上覆蓋了原始影像 10×10 的區域（因為 R 像素每隔一行一列出現一次）。這帶來了一個隱含的優勢：<strong>相同 Kernel Size 的有效空間範圍更大</strong>。</p>
+
+<p>然而，Bayer NR 的一個常見做法是同時處理 4 個 Bayer 通道（R, Gr, Gb, B），但使用<strong>統一的 NR 引擎</strong>分時處理。這樣硬體只需一份 NR 計算單元，透過 4 次 Pass 完成所有通道。由於每個通道的像素密度只有原圖的 1/4，單通道處理的計算量約為全解析度的 1/4，4 個通道加起來仍為 1× 計算量，與 YUV 域的 Y 通道降噪相當。</p>
+
+<h3>YUV Domain NR 的分離處理</h3>
+<p>在 YUV 域中，<strong>Luma（Y）和 Chroma（U/V）可以使用完全不同的 NR 強度和策略</strong>。這是利用了人類視覺系統（HVS）的特性：</p>
+<ul>
+<li>人眼對<strong>亮度細節（Luma Detail）</strong>非常敏感 → Y 通道 NR 必須保守，避免過度模糊紋理</li>
+<li>人眼對<strong>色彩噪聲（Chroma Noise）</strong>容忍度較高 → U/V 通道可使用大 Kernel、強 NR</li>
+</ul>
+
+<p>典型的配比是 Chroma NR 強度為 Luma NR 的 2~4 倍。在硬體中，Chroma 通道通常已經是 4:2:0 或 4:2:2 下取樣，資料量更少，NR 計算量也相應降低。</p>
+
+<h3>記憶體存取模式比較</h3>
+<table>
+<tr><th>NR 域</th><th>資料格式</th><th>像素數（4K）</th><th>每像素位寬</th><th>單幀資料量</th></tr>
+<tr><td>Bayer</td><td>RAW RGGB</td><td>8.3M (4×2.07M)</td><td>10~14 bit</td><td>~12 MB</td></tr>
+<tr><td>YUV 4:2:0</td><td>Y + UV</td><td>8.3M + 2×2.07M</td><td>8~10 bit</td><td>~12 MB</td></tr>
+<tr><td>YUV 4:4:4</td><td>Y + U + V</td><td>3 × 8.3M</td><td>8~10 bit</td><td>~24 MB</td></tr>
+</table>
+
+<div class="info-box key">
+<div class="box-title">重點</div>
+<p>實務中的 NR Pipeline 排列順序是效能和品質的關鍵決策。典型順序為：<strong>RAW TNR → RAW 2D NR → Demosaic → YUV 2D NR</strong>。RAW TNR 放在最前面，因為 RAW 資料的噪聲統計最純粹，TNR 效果最好。RAW 2D NR 在 TNR 之後進一步降低殘餘噪聲，改善 Demosaic 品質。YUV NR 作為最後的精修步驟。</p>
+</div>
+`
+    },
+    {
+      id: "ch3_18",
+      title: "Noise Level Estimation (NLE) 硬體模組",
+      content: `
+<p>降噪演算法的效果高度依賴於準確的噪聲水平估計。<strong>Noise Level Estimation（NLE）</strong>模組負責在即時影像串流中估算當前的噪聲強度，為後續 NR 模組提供自適應的參數調整依據。NLE 是 ISP 中一個小而關鍵的硬體模組。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 780 450" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <rect width="780" height="450" fill="#f5f0eb" rx="8"/>
+  <text x="390" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a5550">NLE 硬體模組架構</text>
+  <defs>
+    <marker id="arrNR18" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6a8a7a"/></marker>
+  </defs>
+
+  <!-- Input -->
+  <rect x="20" y="60" width="100" height="45" rx="6" fill="#6a8a7a" opacity="0.2" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="70" y="80" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">RAW Input</text>
+  <text x="70" y="95" text-anchor="middle" font-size="9" fill="#8a8580">Bayer Stream</text>
+  <line x1="120" y1="82" x2="155" y2="82" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR18)"/>
+
+  <!-- Patch Extractor -->
+  <rect x="158" y="52" width="120" height="60" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="218" y="75" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Patch Extractor</text>
+  <text x="218" y="92" text-anchor="middle" font-size="9" fill="#8a8580">8×8 or 16×16 block</text>
+  <text x="218" y="105" text-anchor="middle" font-size="9" fill="#8a8580">sliding window</text>
+  <line x1="278" y1="82" x2="313" y2="82" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR18)"/>
+
+  <!-- Flat Detector -->
+  <rect x="316" y="42" width="140" height="80" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="386" y="65" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Flat Region</text>
+  <text x="386" y="80" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Detector</text>
+  <text x="386" y="97" text-anchor="middle" font-size="9" fill="#8a8580">Max−Min < Threshold</text>
+  <text x="386" y="110" text-anchor="middle" font-size="9" fill="#8a8580">Gradient < Threshold</text>
+
+  <!-- Branch: flat -->
+  <line x1="456" y1="72" x2="500" y2="72" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR18)"/>
+  <text x="478" y="65" font-size="9" fill="#6a8a7a">Flat</text>
+
+  <!-- Variance Calc -->
+  <rect x="503" y="50" width="130" height="55" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="568" y="72" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Variance Calc</text>
+  <text x="568" y="90" text-anchor="middle" font-size="9" fill="#8a8580">σ² = E[x²]−E[x]²</text>
+
+  <!-- Accumulator -->
+  <line x1="633" y1="77" x2="668" y2="77" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR18)"/>
+  <rect x="671" y="50" width="90" height="55" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="716" y="72" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Bin Sort</text>
+  <text x="716" y="90" text-anchor="middle" font-size="9" fill="#8a8580">by signal level</text>
+
+  <!-- Branch: non-flat (discarded) -->
+  <line x1="456" y1="95" x2="480" y2="110" stroke="#d35050" stroke-width="1.5"/>
+  <text x="490" y="120" font-size="9" fill="#d35050">Non-flat → Discard</text>
+
+  <!-- NLF Curve Below -->
+  <rect x="20" y="150" width="740" height="280" rx="6" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <text x="390" y="175" text-anchor="middle" font-size="13" font-weight="bold" fill="#5a5550">Noise Level Function (NLF) 建構</text>
+
+  <!-- NLF Chart -->
+  <!-- Axes -->
+  <line x1="80" y1="200" x2="80" y2="380" stroke="#5a5550" stroke-width="1.5"/>
+  <line x1="80" y1="380" x2="400" y2="380" stroke="#5a5550" stroke-width="1.5"/>
+  <text x="240" y="410" text-anchor="middle" font-size="10" fill="#5a5550">Signal Level (Mean Intensity)</text>
+  <text x="45" y="290" text-anchor="middle" font-size="10" fill="#5a5550" transform="rotate(-90, 45, 290)">Noise σ²</text>
+
+  <!-- Poisson-Gaussian line -->
+  <path d="M 90 360 Q 200 320 300 250 Q 370 210 390 200" stroke="#6a8a7a" stroke-width="2.5" fill="none"/>
+  <text x="350" y="195" font-size="10" fill="#6a8a7a">σ² = a·μ + b</text>
+
+  <!-- Scatter points (measured from flat patches) -->
+  <circle cx="100" cy="355" r="3" fill="#e8a04a"/>
+  <circle cx="120" cy="348" r="3" fill="#e8a04a"/>
+  <circle cx="140" cy="342" r="3" fill="#e8a04a"/>
+  <circle cx="170" cy="332" r="3" fill="#e8a04a"/>
+  <circle cx="200" cy="318" r="3" fill="#e8a04a"/>
+  <circle cx="230" cy="305" r="3" fill="#e8a04a"/>
+  <circle cx="260" cy="288" r="3" fill="#e8a04a"/>
+  <circle cx="290" cy="268" r="3" fill="#e8a04a"/>
+  <circle cx="320" cy="245" r="3" fill="#e8a04a"/>
+  <circle cx="350" cy="222" r="3" fill="#e8a04a"/>
+  <circle cx="380" cy="205" r="3" fill="#e8a04a"/>
+  <text x="300" y="365" font-size="9" fill="#e8a04a">● Flat patch measurements</text>
+
+  <!-- Per-channel NLF -->
+  <rect x="430" y="195" width="310" height="200" rx="6" fill="#f5f0eb" stroke="#d5cec7" stroke-width="1"/>
+  <text x="585" y="218" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">Per-Channel NLF (Bayer)</text>
+  <line x1="460" y1="240" x2="460" y2="370" stroke="#8a8580" stroke-width="1"/>
+  <line x1="460" y1="370" x2="710" y2="370" stroke="#8a8580" stroke-width="1"/>
+  <path d="M 470 360 L 570 310 L 700 240" stroke="#d35050" stroke-width="1.5" fill="none"/>
+  <text x="705" y="238" font-size="9" fill="#d35050">R</text>
+  <path d="M 470 355 L 570 315 L 700 250" stroke="#60a060" stroke-width="1.5" fill="none"/>
+  <text x="705" y="248" font-size="9" fill="#60a060">Gr</text>
+  <path d="M 470 352 L 570 318 L 700 255" stroke="#40b040" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+  <text x="705" y="258" font-size="9" fill="#40b040">Gb</text>
+  <path d="M 470 365 L 570 305 L 700 230" stroke="#5060b0" stroke-width="1.5" fill="none"/>
+  <text x="705" y="228" font-size="9" fill="#5060b0">B</text>
+  <text x="585" y="395" text-anchor="middle" font-size="9" fill="#8a8580">各通道 NLF 斜率和截距不同</text>
+</svg>
+<div class="caption">圖 3-18：NLE 硬體模組架構及 Noise Level Function 建構示意圖</div>
+</div>
+
+<h3>Flat Region Detection</h3>
+<p>NLE 的核心思想是：在影像中找到<strong>平坦區域（Flat Region）</strong>，這些區域的像素變異主要來自噪聲而非場景內容。Flat Region Detection 的硬體實現通常結合多個條件：</p>
+<ul>
+<li><strong>Max−Min 準則</strong>：Block 內最大值與最小值之差小於閾值 T₁</li>
+<li><strong>Gradient 準則</strong>：水平和垂直方向的 Sobel 梯度之和小於閾值 T₂</li>
+<li><strong>Laplacian 準則</strong>：Block 的 Laplacian 響應小於閾值 T₃（排除邊緣和紋理）</li>
+</ul>
+
+<p>這些運算在硬體中非常輕量：Max/Min 用比較樹實現，Gradient 用固定係數卷積實現，每個判斷只需幾個加法器和比較器。</p>
+
+<h3>Noise Level Function (NLF) 建構</h3>
+<p>對於通過 Flat 判定的 Block，計算其<strong>均值（Mean）</strong>和<strong>變異數（Variance）</strong>。根據 Poisson-Gaussian 噪聲模型，NLF 為：</p>
+<div class="formula">σ²(μ) = a × μ + b</div>
+
+<p>其中 a 對應 Shot Noise 的增益係數，b 對應 Read Noise 的變異數。NLE 模組將測量到的 (Mean, Variance) 點對按照 Signal Level 分 Bin（例如 16 或 32 個 Bin），每個 Bin 內對 Variance 取中位數或平均值，最終擬合出 NLF 曲線。</p>
+
+<h3>Per-Channel 估計</h3>
+<p>在 Bayer Domain 中，R、Gr、Gb、B 四個通道的噪聲特性不完全相同：</p>
+<ul>
+<li><strong>R 和 B 通道</strong>的 White Balance Gain 通常較大（特別是高色溫光源下的 B 通道），Gain 後的噪聲更大</li>
+<li><strong>Gr 和 Gb 通道</strong>通常相似，但可能因為電路佈局差異有微小不同</li>
+</ul>
+
+<p>因此，精確的 NLE 應該獨立估計 4 個通道的 NLF 參數。硬體上，分通道估計只需要將 Flat Patch 的統計按通道分別累積，額外的面積開銷極小（4 組累加器）。</p>
+
+<h3>NLF 儲存與插值</h3>
+<p>NLF 參數在硬體中通常以 <strong>LUT 形式</strong>儲存：根據 Signal Level 索引，查出對應的噪聲標準差 σ。典型的 LUT 配置：</p>
+<table>
+<tr><th>參數</th><th>典型值</th></tr>
+<tr><td>LUT Entries</td><td>16 ~ 64 entries</td></tr>
+<tr><td>每 Entry 位寬</td><td>10 ~ 12 bits (σ² value)</td></tr>
+<tr><td>通道數</td><td>4 (R/Gr/Gb/B) 或 1 (共用)</td></tr>
+<tr><td>總 LUT 大小</td><td>64 × 12 × 4 = 384 bytes（極小）</td></tr>
+<tr><td>插值方式</td><td>線性插值 (1 次乘法 + 1 次加法)</td></tr>
+</table>
+
+<div class="info-box example">
+<div class="box-title">📝 範例</div>
+<p>假設 NLF LUT 有 16 entries，覆蓋 Signal Level 0~4095（12-bit）：</p>
+<pre>
+// Signal Level 到 LUT index 的映射
+lut_idx = signal_level >> 8;  // 12-bit >> 8 = 4-bit index (0~15)
+frac = signal_level & 0xFF;   // 8-bit 小數部分
+
+// 線性插值
+sigma_sq = lut[lut_idx] + ((lut[lut_idx+1] - lut[lut_idx]) * frac) >> 8;
+
+// 輸出 sigma_sq 供 NR 模組使用
+nr_strength = f(sigma_sq);  // 根據噪聲強度調整 NR 參數
+</pre>
+</div>
+
+<div class="info-box key">
+<div class="box-title">重點</div>
+<p>NLE 可以在兩個模式下工作：(1) <strong>Calibration Mode</strong>：出廠時使用標準測試圖卡（如灰階卡）在不同 ISO 下拍攝，離線擬合 NLF 參數並燒錄到 ISP 的 NLF LUT；(2) <strong>Runtime Mode</strong>：在實際場景中即時估計噪聲水平，動態更新 NLF LUT。大多數手機 ISP 採用混合策略：出廠校準提供基準 NLF，Runtime NLE 在此基礎上做微調。</p>
+</div>
+`
+    },
+    {
+      id: "ch3_19",
+      title: "NR Tuning 參數設計：Strength Curve 與 ISO-dependent Tuning",
+      content: `
+<p>NR 演算法在硬體上實現之後，如何<strong>調參（Tuning）</strong>以達到最佳影像品質，是 ISP 工程師日常工作中最耗時的任務之一。本節探討 NR Tuning 的參數體系設計、ISO-dependent 的自適應策略，以及實務中的調參方法論。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 780 500" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <rect width="780" height="500" fill="#f5f0eb" rx="8"/>
+  <text x="390" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a5550">NR Strength Curve Family (ISO-indexed)</text>
+  <defs>
+    <marker id="arrNR19" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6a8a7a"/></marker>
+  </defs>
+
+  <!-- Main Chart: NR Strength vs Signal Level -->
+  <rect x="50" y="45" width="400" height="280" rx="4" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <line x1="90" y1="60" x2="90" y2="300" stroke="#5a5550" stroke-width="1.5"/>
+  <line x1="90" y1="300" x2="430" y2="300" stroke="#5a5550" stroke-width="1.5"/>
+  <text x="260" y="325" text-anchor="middle" font-size="10" fill="#5a5550">Signal Level (Pixel Intensity)</text>
+  <text x="55" y="180" text-anchor="middle" font-size="10" fill="#5a5550" transform="rotate(-90, 55, 180)">NR Strength (σ_r)</text>
+
+  <!-- ISO 6400 curve (highest) -->
+  <path d="M 100 80 L 150 85 L 200 95 L 280 120 L 350 160 L 420 200" stroke="#d35050" stroke-width="2" fill="none"/>
+  <text x="425" y="200" font-size="9" fill="#d35050">ISO 6400</text>
+
+  <!-- ISO 3200 -->
+  <path d="M 100 110 L 150 115 L 200 125 L 280 145 L 350 175 L 420 215" stroke="#e8a04a" stroke-width="2" fill="none"/>
+  <text x="425" y="215" font-size="9" fill="#e8a04a">ISO 3200</text>
+
+  <!-- ISO 1600 -->
+  <path d="M 100 145 L 150 150 L 200 157 L 280 172 L 350 198 L 420 235" stroke="#6a8a7a" stroke-width="2" fill="none"/>
+  <text x="425" y="235" font-size="9" fill="#6a8a7a">ISO 1600</text>
+
+  <!-- ISO 800 -->
+  <path d="M 100 185 L 150 188 L 200 193 L 280 205 L 350 225 L 420 255" stroke="#5060b0" stroke-width="2" fill="none"/>
+  <text x="425" y="255" font-size="9" fill="#5060b0">ISO 800</text>
+
+  <!-- ISO 100 (lowest) -->
+  <path d="M 100 260 L 150 262 L 200 265 L 280 270 L 350 278 L 420 285" stroke="#8a8580" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+  <text x="425" y="285" font-size="9" fill="#8a8580">ISO 100</text>
+
+  <!-- Annotations -->
+  <text x="140" y="75" font-size="9" fill="#d35050">← 暗部 NR 最強</text>
+  <text x="350" y="295" font-size="9" fill="#8a8580">高光 NR 最弱 →</text>
+
+  <!-- Tuning Knob Diagram -->
+  <rect x="490" y="45" width="270" height="280" rx="6" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <text x="625" y="70" text-anchor="middle" font-size="12" font-weight="bold" fill="#5a5550">NR Tuning 參數體系</text>
+  <line x1="510" y1="80" x2="740" y2="80" stroke="#d5cec7" stroke-width="1"/>
+
+  <!-- Parameter blocks -->
+  <rect x="510" y="90" width="110" height="35" rx="4" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="565" y="112" text-anchor="middle" font-size="9" font-weight="bold" fill="#5a5550">Spatial σ_s</text>
+  <rect x="640" y="90" width="110" height="35" rx="4" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="695" y="112" text-anchor="middle" font-size="9" font-weight="bold" fill="#5a5550">Range σ_r</text>
+
+  <rect x="510" y="135" width="110" height="35" rx="4" fill="#e8a04a" opacity="0.15" stroke="#e8a04a" stroke-width="1"/>
+  <text x="565" y="157" text-anchor="middle" font-size="9" font-weight="bold" fill="#5a5550">TNR Alpha</text>
+  <rect x="640" y="135" width="110" height="35" rx="4" fill="#e8a04a" opacity="0.15" stroke="#e8a04a" stroke-width="1"/>
+  <text x="695" y="157" text-anchor="middle" font-size="9" font-weight="bold" fill="#5a5550">TNR Motion Th</text>
+
+  <rect x="510" y="180" width="110" height="35" rx="4" fill="#5060b0" opacity="0.15" stroke="#5060b0" stroke-width="1"/>
+  <text x="565" y="202" text-anchor="middle" font-size="9" font-weight="bold" fill="#5a5550">Luma NR Str</text>
+  <rect x="640" y="180" width="110" height="35" rx="4" fill="#5060b0" opacity="0.15" stroke="#5060b0" stroke-width="1"/>
+  <text x="695" y="202" text-anchor="middle" font-size="9" font-weight="bold" fill="#5a5550">Chroma NR Str</text>
+
+  <rect x="510" y="225" width="240" height="35" rx="4" fill="#d35050" opacity="0.1" stroke="#d35050" stroke-width="1"/>
+  <text x="630" y="247" text-anchor="middle" font-size="9" font-weight="bold" fill="#5a5550">Edge Preservation Threshold</text>
+
+  <text x="625" y="285" text-anchor="middle" font-size="10" fill="#8a8580">每組參數 × N 個 ISO 等級</text>
+  <text x="625" y="300" text-anchor="middle" font-size="10" fill="#8a8580">= 完整 Tuning Table</text>
+
+  <!-- TNR Strength vs Motion Chart -->
+  <rect x="50" y="345" width="340" height="145" rx="4" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <text x="220" y="368" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">TNR: Motion vs Temporal Weight</text>
+  <line x1="90" y1="375" x2="90" y2="470" stroke="#5a5550" stroke-width="1"/>
+  <line x1="90" y1="470" x2="370" y2="470" stroke="#5a5550" stroke-width="1"/>
+  <text x="230" y="488" text-anchor="middle" font-size="9" fill="#5a5550">Motion Magnitude (SAD / |MV|)</text>
+  <text x="75" y="420" text-anchor="middle" font-size="9" fill="#5a5550" transform="rotate(-90, 75, 420)">α (current weight)</text>
+  <path d="M 100 460 L 140 458 L 180 450 L 220 420 L 260 395 L 300 388 L 360 385" stroke="#6a8a7a" stroke-width="2" fill="none"/>
+  <text x="200" y="460" font-size="8" fill="#6a8a7a">靜態: α小 → 強TNR</text>
+  <text x="310" y="380" font-size="8" fill="#6a8a7a">運動: α大 → 弱TNR</text>
+
+  <!-- Interpolation diagram -->
+  <rect x="420" y="345" width="340" height="145" rx="4" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <text x="590" y="368" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">ISO 間參數平滑插值</text>
+  <line x1="460" y1="395" x2="460" y2="470" stroke="#5a5550" stroke-width="1"/>
+  <line x1="460" y1="470" x2="730" y2="470" stroke="#5a5550" stroke-width="1"/>
+  <text x="595" y="488" text-anchor="middle" font-size="9" fill="#5a5550">Analog Gain (ISO)</text>
+
+  <circle cx="500" cy="450" r="5" fill="#6a8a7a" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="500" y="445" text-anchor="middle" font-size="8" fill="#5a5550">ISO 100</text>
+  <circle cx="560" cy="435" r="5" fill="#6a8a7a" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="560" y="428" text-anchor="middle" font-size="8" fill="#5a5550">400</text>
+  <circle cx="620" cy="415" r="5" fill="#6a8a7a" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="620" y="408" text-anchor="middle" font-size="8" fill="#5a5550">1600</text>
+  <circle cx="680" cy="400" r="5" fill="#6a8a7a" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="680" y="393" text-anchor="middle" font-size="8" fill="#5a5550">6400</text>
+  <path d="M 500 450 Q 530 442 560 435 Q 590 425 620 415 Q 650 407 680 400" stroke="#6a8a7a" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+  <text x="590" y="465" text-anchor="middle" font-size="9" fill="#8a8580">Log-domain 線性插值</text>
+</svg>
+<div class="caption">圖 3-19：NR Strength Curve Family 與 Tuning 參數體系</div>
+</div>
+
+<h3>ISO-dependent Tuning Table</h3>
+<p>NR 的核心 Tuning 策略是建立一張以 <strong>ISO（或等效 Analog Gain）為索引</strong>的參數表。典型的 Tuning Table 結構：</p>
+
+<table>
+<tr><th>ISO</th><th>RAW NR σ_r</th><th>RAW NR σ_s</th><th>TNR α_min</th><th>YUV-Y NR</th><th>YUV-C NR</th><th>Edge Th</th></tr>
+<tr><td>100</td><td>4</td><td>1.0</td><td>0.3</td><td>2</td><td>8</td><td>20</td></tr>
+<tr><td>400</td><td>8</td><td>1.2</td><td>0.25</td><td>6</td><td>16</td><td>25</td></tr>
+<tr><td>1600</td><td>16</td><td>1.5</td><td>0.15</td><td>12</td><td>32</td><td>35</td></tr>
+<tr><td>6400</td><td>32</td><td>2.0</td><td>0.10</td><td>24</td><td>48</td><td>50</td></tr>
+</table>
+
+<p>中間 ISO 值（如 ISO 640）的參數透過<strong>對數域線性插值（Log-domain Interpolation）</strong>計算：</p>
+<div class="formula">Param(ISO) = Param(ISO_low) + (Param(ISO_high) − Param(ISO_low)) × log(ISO/ISO_low) / log(ISO_high/ISO_low)</div>
+
+<h3>Spatial NR Strength Curve</h3>
+<p>NR 強度不應是固定值，而應隨<strong>像素亮度（Signal Level）</strong>變化。原因是噪聲本身是 Signal-dependent 的（Shot Noise ∝ √signal）。Strength Curve 的設計原則：</p>
+<ul>
+<li><strong>暗部（Low signal）</strong>：噪聲最顯著，NR 強度最大</li>
+<li><strong>中間調</strong>：NR 適中，平衡降噪與細節保持</li>
+<li><strong>高光（High signal）</strong>：SNR 高，NR 強度最小，保持紋理細節</li>
+</ul>
+
+<p>在硬體中，Strength Curve 通常用 <strong>Piece-wise Linear（PWL）LUT</strong>實現：8~16 個控制點定義曲線形狀，中間值線性插值。這樣 Tuning 工程師可以靈活調整曲線的每一段。</p>
+
+<h3>TNR Motion-Adaptive Curve</h3>
+<p>TNR 的時域融合權重 α 需要根據<strong>運動量級</strong>自適應調整。典型的 Motion-to-Alpha 映射曲線呈 S 型：</p>
+<ul>
+<li>Motion < Threshold_low：α = α_min（最強時域降噪）</li>
+<li>Threshold_low < Motion < Threshold_high：α 線性增長</li>
+<li>Motion > Threshold_high：α = 1.0（不做時域融合）</li>
+</ul>
+
+<h3>Chroma vs Luma NR 比例</h3>
+<p>由於人眼對色彩噪聲的容忍度較低（色斑比亮度噪點更刺眼），Chroma NR 的強度通常設為 Luma NR 的 <strong>2~4 倍</strong>。在高 ISO 場景下，Chroma NR 可以更激進（4× Luma NR），因為此時色彩細節已被噪聲淹沒，強力 Chroma NR 只會讓畫面看起來更乾淨，不會損失有意義的色彩資訊。</p>
+
+<div class="info-box tip">
+<div class="box-title">💡 提示</div>
+<p>NR Tuning 的實務工作流程：(1) 從 Noise Profile 的理論值出發設定初始參數；(2) 在標準測試場景（ISO 12233 Chart、TE42 Chart）下拍攝，評估降噪效果和細節保持；(3) 在實際場景（人臉、風景、夜景）下主觀評估；(4) 微調各 ISO 段的參數。整個流程通常需要 2~4 週的迭代。自動化 Tuning 工具（使用 PSNR/SSIM 為目標函數）可以加速前兩步，但主觀評估和場景適應仍需要人工介入。</p>
+</div>
+
+<div class="info-box warn">
+<div class="box-title">⚠️ 注意</div>
+<p>NR Tuning 最常見的陷阱是 <strong>ISO 切換點的跳變</strong>。如果相鄰 ISO 等級的參數差異太大，在 AE 自動切換 ISO 時會看到畫面品質的突然變化（噪聲突然增減）。解決方法是確保 ISO 間的插值足夠平滑，並且 DCG（Dual Conversion Gain）切換點的參數也要仔細銜接。</p>
+</div>
+`
+    },
+    {
+      id: "ch3_20",
+      title: "Edge-preserving NR 技術：Gradient-based 與 Edge Map",
+      content: `
+<p>降噪的核心矛盾在於<strong>去噪與保細節的對立</strong>。過度降噪會模糊邊緣和紋理，不足的降噪則留下明顯噪點。<strong>Edge-preserving NR</strong>技術透過檢測影像中的邊緣和紋理結構，在不同區域施加不同強度的降噪，是現代 ISP NR 模組中不可或缺的功能。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 780 500" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <rect width="780" height="500" fill="#f5f0eb" rx="8"/>
+  <text x="390" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a5550">Edge Map Guided NR Pipeline</text>
+  <defs>
+    <marker id="arrNR20" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6a8a7a"/></marker>
+  </defs>
+
+  <!-- Input Image -->
+  <rect x="20" y="60" width="100" height="50" rx="6" fill="#6a8a7a" opacity="0.2" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="70" y="82" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Input Image</text>
+  <text x="70" y="98" text-anchor="middle" font-size="9" fill="#8a8580">RAW / YUV</text>
+
+  <!-- Branch to Edge Detection -->
+  <line x1="120" y1="75" x2="170" y2="75" stroke="#6a8a7a" stroke-width="1.5"/>
+  <line x1="170" y1="75" x2="170" y2="50" stroke="#6a8a7a" stroke-width="1.5"/>
+  <line x1="170" y1="50" x2="200" y2="50" stroke="#6a8a7a" stroke-width="1.5" marker-end="url(#arrNR20)"/>
+  <line x1="170" y1="75" x2="170" y2="175" stroke="#6a8a7a" stroke-width="1.5"/>
+  <line x1="170" y1="175" x2="200" y2="175" stroke="#6a8a7a" stroke-width="1.5" marker-end="url(#arrNR20)"/>
+
+  <!-- Edge Detection Path -->
+  <rect x="203" y="30" width="140" height="55" rx="6" fill="white" stroke="#5060b0" stroke-width="2"/>
+  <text x="273" y="52" text-anchor="middle" font-size="10" font-weight="bold" fill="#5060b0">Gradient Calc</text>
+  <text x="273" y="67" text-anchor="middle" font-size="9" fill="#8a8580">Sobel Gx, Gy</text>
+  <text x="273" y="79" text-anchor="middle" font-size="9" fill="#8a8580">G = |Gx|+|Gy|</text>
+  <line x1="343" y1="57" x2="375" y2="57" stroke="#5060b0" stroke-width="1.5" marker-end="url(#arrNR20)"/>
+
+  <!-- Edge Classifier -->
+  <rect x="378" y="30" width="130" height="55" rx="6" fill="white" stroke="#5060b0" stroke-width="2"/>
+  <text x="443" y="50" text-anchor="middle" font-size="10" font-weight="bold" fill="#5060b0">Region Classifier</text>
+  <text x="443" y="65" text-anchor="middle" font-size="9" fill="#8a8580">Flat / Texture / Edge</text>
+  <text x="443" y="79" text-anchor="middle" font-size="9" fill="#8a8580">based on G thresholds</text>
+  <line x1="508" y1="57" x2="540" y2="57" stroke="#5060b0" stroke-width="1.5" marker-end="url(#arrNR20)"/>
+
+  <!-- Edge Map / NR Strength Map -->
+  <rect x="543" y="30" width="130" height="55" rx="6" fill="#5060b0" opacity="0.15" stroke="#5060b0" stroke-width="2"/>
+  <text x="608" y="50" text-anchor="middle" font-size="10" font-weight="bold" fill="#5060b0">NR Strength Map</text>
+  <text x="608" y="65" text-anchor="middle" font-size="9" fill="#5060b0">Flat: 100% NR</text>
+  <text x="608" y="79" text-anchor="middle" font-size="9" fill="#5060b0">Edge: 10% NR</text>
+
+  <!-- NR Engine Path -->
+  <rect x="203" y="155" width="140" height="55" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="273" y="177" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">NR Engine</text>
+  <text x="273" y="192" text-anchor="middle" font-size="9" fill="#8a8580">Bilateral Filter</text>
+  <text x="273" y="205" text-anchor="middle" font-size="9" fill="#8a8580">with adaptive σ_r</text>
+
+  <!-- Strength Map feeds into NR Engine -->
+  <line x1="608" y1="85" x2="608" y2="170" stroke="#5060b0" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <line x1="608" y1="170" x2="343" y2="182" stroke="#5060b0" stroke-width="1.5" stroke-dasharray="4,2" marker-end="url(#arrNR20)"/>
+  <text x="490" y="150" font-size="9" fill="#5060b0">Modulate NR strength</text>
+
+  <!-- Output -->
+  <line x1="343" y1="182" x2="690" y2="182" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR20)" stroke-dasharray="none"/>
+  <rect x="693" y="160" width="70" height="45" rx="6" fill="#6a8a7a" opacity="0.2" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="728" y="187" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Output</text>
+
+  <!-- Region Classification Visualization -->
+  <rect x="20" y="240" width="740" height="240" rx="6" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <text x="390" y="265" text-anchor="middle" font-size="13" font-weight="bold" fill="#5a5550">三區域分類與 NR 策略</text>
+
+  <!-- Flat Region -->
+  <rect x="40" y="280" width="220" height="180" rx="6" fill="#6a8a7a" opacity="0.08" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="150" y="302" text-anchor="middle" font-size="11" font-weight="bold" fill="#6a8a7a">Flat Region</text>
+  <text x="150" y="320" text-anchor="middle" font-size="10" fill="#5a5550">G < T_low</text>
+  <rect x="60" y="330" width="180" height="25" rx="3" fill="#6a8a7a" opacity="0.3"/>
+  <text x="150" y="347" text-anchor="middle" font-size="10" fill="white" font-weight="bold">NR: 100% 強度</text>
+  <text x="60" y="375" font-size="9" fill="#5a5550">• σ_r = σ_r_max</text>
+  <text x="60" y="392" font-size="9" fill="#5a5550">• TNR α = α_min (強)</text>
+  <text x="60" y="409" font-size="9" fill="#5a5550">• 天空、牆壁、皮膚</text>
+  <text x="60" y="426" font-size="9" fill="#5a5550">• 不含有意義的紋理</text>
+  <text x="60" y="443" font-size="9" fill="#6a8a7a">→ 最大降噪，無細節損失</text>
+
+  <!-- Texture Region -->
+  <rect x="280" y="280" width="220" height="180" rx="6" fill="#e8a04a" opacity="0.08" stroke="#e8a04a" stroke-width="1.5"/>
+  <text x="390" y="302" text-anchor="middle" font-size="11" font-weight="bold" fill="#e8a04a">Texture Region</text>
+  <text x="390" y="320" text-anchor="middle" font-size="10" fill="#5a5550">T_low ≤ G < T_high</text>
+  <rect x="300" y="330" width="180" height="25" rx="3" fill="#e8a04a" opacity="0.3"/>
+  <text x="390" y="347" text-anchor="middle" font-size="10" fill="white" font-weight="bold">NR: 30~70% 強度</text>
+  <text x="300" y="375" font-size="9" fill="#5a5550">• σ_r = 中等值</text>
+  <text x="300" y="392" font-size="9" fill="#5a5550">• TNR α = 中等</text>
+  <text x="300" y="409" font-size="9" fill="#5a5550">• 草地、布料、頭髮</text>
+  <text x="300" y="426" font-size="9" fill="#5a5550">• 含低頻紋理</text>
+  <text x="300" y="443" font-size="9" fill="#e8a04a">→ 適度降噪，保持紋理</text>
+
+  <!-- Edge Region -->
+  <rect x="520" y="280" width="220" height="180" rx="6" fill="#d35050" opacity="0.08" stroke="#d35050" stroke-width="1.5"/>
+  <text x="630" y="302" text-anchor="middle" font-size="11" font-weight="bold" fill="#d35050">Edge Region</text>
+  <text x="630" y="320" text-anchor="middle" font-size="10" fill="#5a5550">G ≥ T_high</text>
+  <rect x="540" y="330" width="180" height="25" rx="3" fill="#d35050" opacity="0.3"/>
+  <text x="630" y="347" text-anchor="middle" font-size="10" fill="white" font-weight="bold">NR: 0~30% 強度</text>
+  <text x="540" y="375" font-size="9" fill="#5a5550">• σ_r = σ_r_min 或 0</text>
+  <text x="540" y="392" font-size="9" fill="#5a5550">• TNR α = 接近 1.0</text>
+  <text x="540" y="409" font-size="9" fill="#5a5550">• 物體輪廓、文字</text>
+  <text x="540" y="426" font-size="9" fill="#5a5550">• 強梯度，高對比</text>
+  <text x="540" y="443" font-size="9" fill="#d35050">→ 極少降噪，銳利邊緣</text>
+</svg>
+<div class="caption">圖 3-20：Edge Map Guided NR Pipeline 與三區域分類策略</div>
+</div>
+
+<h3>Gradient 計算與 Edge Detection</h3>
+<p>Edge-preserving NR 的第一步是計算<strong>梯度場（Gradient Field）</strong>。最常用的是 Sobel Operator：</p>
+<div class="formula">Gx = [-1 0 1; -2 0 2; -1 0 1] * I,  Gy = [-1 -2 -1; 0 0 0; 1 2 1] * I</div>
+<div class="formula">Gradient Magnitude G = |Gx| + |Gy| (L1-norm, 硬體友善)</div>
+
+<p>Sobel 在硬體中非常高效：只需要 6 個加法和 2 個移位（乘 2 等於左移 1）。對於 3×3 Window 的 Sobel，只需 2 行 Line Buffer。</p>
+
+<h3>三區域分類</h3>
+<p>根據 Gradient Magnitude 將像素分為三類：</p>
+<ul>
+<li><strong>Flat（G < T_low）</strong>：平坦區域，可以施加最大強度的 NR</li>
+<li><strong>Texture（T_low ≤ G < T_high）</strong>：紋理區域，需要適度 NR，保持紋理結構</li>
+<li><strong>Edge（G ≥ T_high）</strong>：邊緣區域，NR 強度最小或為零</li>
+</ul>
+
+<p>在硬體中，分類結果直接調制 NR 引擎的 σ_r 參數：</p>
+<div class="formula">σ_r_effective = σ_r_base × NR_strength_map(G)</div>
+
+<p>NR_strength_map 是一個 PWL 函數，用 G 值為輸入，輸出 NR 強度倍率（0.0 ~ 1.0）。</p>
+
+<h3>進階：方向感知 NR</h3>
+<p>簡單的 Gradient Magnitude 只告訴我們「這裡有邊緣」，但不告訴我們邊緣的<strong>方向</strong>。更進階的做法是利用梯度方向來做<strong>方向感知降噪（Directional NR）</strong>：沿著邊緣方向施加更強的 NR，垂直於邊緣方向施加更弱的 NR。</p>
+
+<div class="formula">θ = arctan(Gy / Gx) → 量化為 4 或 8 個方向</div>
+
+<p>硬體實現中，arctan 的精確計算太昂貴。常見做法是用 Gx 和 Gy 的符號和相對大小來判斷大致方向（0°、45°、90°、135° 四個方向），只需要幾個比較器。</p>
+
+<h3>Edge Map 的時域一致性</h3>
+<p>在 Video 模式下，Edge Map 需要考慮<strong>時域一致性（Temporal Consistency）</strong>。如果 Edge Map 在幀間劇烈跳動，NR 強度也會跳動，導致閃爍（Flickering）。常見的解決方法是對 Edge Map 施加時域低通濾波：</p>
+<div class="formula">EdgeMap(n) = β × EdgeMap_current + (1−β) × EdgeMap(n−1)</div>
+
+<div class="info-box key">
+<div class="box-title">重點</div>
+<p>Edge-preserving NR 的 Threshold（T_low, T_high）設定是一個精細的 Tuning 問題。Threshold 太低會將噪聲誤判為 Texture/Edge，導致 Flat 區域降噪不足；Threshold 太高會將細紋理誤判為 Flat，導致紋理被模糊。這些 Threshold 也需要隨 ISO/Gain 自適應調整：高 ISO 時噪聲引起的 Gradient 較大，T_low 和 T_high 需要相應提高。</p>
+</div>
+
+<div class="info-box warn">
+<div class="box-title">⚠️ 注意</div>
+<p>Edge-preserving NR 中一個常見的 Artifact 是 <strong>Halo（光暈）</strong>：在強邊緣附近的平坦區域被過度降噪，而邊緣本身未被降噪，兩者之間出現明暗不自然的過渡。這通常是因為 NR Strength 在邊緣附近的突然變化所致。解決方法是使用更漸進的 Strength 過渡曲線，或者在 NR 後加入一個小型的 Feathering 操作來柔化 NR Strength Map 的邊界。</p>
+</div>
+`
+    },
+    {
+      id: "ch3_21",
+      title: "車用相機 NR 特殊考量",
+      content: `
+<p>車用相機（Automotive Camera）的降噪需求與消費級手機截然不同。在 ADAS（Advanced Driver Assistance Systems）和自動駕駛場景中，NR 不僅影響視覺品質，更直接關係到<strong>功能安全（Functional Safety）</strong>。本節探討車用 ISP NR 的特殊需求與設計考量。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 780 520" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <rect width="780" height="520" fill="#f5f0eb" rx="8"/>
+  <text x="390" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a5550">車用相機 NR 需求雷達圖與溫度-噪聲關係</text>
+
+  <!-- Radar Chart -->
+  <text x="220" y="55" text-anchor="middle" font-size="13" font-weight="bold" fill="#6a8a7a">NR 需求雷達圖比較</text>
+
+  <!-- Radar axes (6 axes) -->
+  <!-- Center at (220, 270), radius 150 -->
+  <!-- Axes: 0°=top (latency), 60° (detail), 120° (robustness), 180° (NR quality), 240° (power), 300° (safety) -->
+  <line x1="220" y1="120" x2="220" y2="270" stroke="#d5cec7" stroke-width="1"/>
+  <line x1="220" y1="270" x2="350" y2="195" stroke="#d5cec7" stroke-width="1"/>
+  <line x1="220" y1="270" x2="350" y2="345" stroke="#d5cec7" stroke-width="1"/>
+  <line x1="220" y1="270" x2="220" y2="420" stroke="#d5cec7" stroke-width="1"/>
+  <line x1="220" y1="270" x2="90" y2="345" stroke="#d5cec7" stroke-width="1"/>
+  <line x1="220" y1="270" x2="90" y2="195" stroke="#d5cec7" stroke-width="1"/>
+
+  <!-- Axis labels -->
+  <text x="220" y="110" text-anchor="middle" font-size="10" fill="#5a5550">低延遲</text>
+  <text x="360" y="192" font-size="10" fill="#5a5550">細節保持</text>
+  <text x="360" y="352" font-size="10" fill="#5a5550">穩健性</text>
+  <text x="220" y="438" text-anchor="middle" font-size="10" fill="#5a5550">NR 品質</text>
+  <text x="52" y="352" font-size="10" fill="#5a5550">低功耗</text>
+  <text x="52" y="192" font-size="10" fill="#5a5550">功能安全</text>
+
+  <!-- Automotive (outer, strong in safety/latency) -->
+  <polygon points="220,140 320,210 310,330 220,380 130,330 110,210" fill="#d35050" opacity="0.15" stroke="#d35050" stroke-width="2"/>
+  <text x="220" y="155" text-anchor="middle" font-size="9" font-weight="bold" fill="#d35050">★</text>
+  <text x="112" y="215" font-size="9" font-weight="bold" fill="#d35050">★</text>
+
+  <!-- Mobile (inner on safety/latency, outer on quality) -->
+  <polygon points="220,185 340,220 340,340 220,400 110,310 120,225" fill="#5060b0" opacity="0.15" stroke="#5060b0" stroke-width="2"/>
+
+  <!-- Legend -->
+  <rect x="80" y="455" width="12" height="12" fill="#d35050" opacity="0.4"/>
+  <text x="98" y="466" font-size="10" fill="#d35050">車用 Automotive</text>
+  <rect x="200" y="455" width="12" height="12" fill="#5060b0" opacity="0.4"/>
+  <text x="218" y="466" font-size="10" fill="#5060b0">手機 Mobile</text>
+
+  <!-- Temperature vs Noise Chart -->
+  <rect x="430" y="50" width="330" height="250" rx="6" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <text x="595" y="75" text-anchor="middle" font-size="12" font-weight="bold" fill="#5a5550">溫度 vs 暗電流噪聲</text>
+
+  <!-- Axes -->
+  <line x1="480" y1="90" x2="480" y2="270" stroke="#5a5550" stroke-width="1.5"/>
+  <line x1="480" y1="270" x2="730" y2="270" stroke="#5a5550" stroke-width="1.5"/>
+  <text x="605" y="290" text-anchor="middle" font-size="10" fill="#5a5550">溫度 (°C)</text>
+  <text x="460" y="180" text-anchor="middle" font-size="10" fill="#5a5550" transform="rotate(-90, 460, 180)">Dark Current (e⁻/s)</text>
+
+  <!-- Temperature marks -->
+  <text x="500" y="285" text-anchor="middle" font-size="8" fill="#8a8580">-40</text>
+  <text x="545" y="285" text-anchor="middle" font-size="8" fill="#8a8580">-20</text>
+  <text x="590" y="285" text-anchor="middle" font-size="8" fill="#8a8580">0</text>
+  <text x="635" y="285" text-anchor="middle" font-size="8" fill="#8a8580">25</text>
+  <text x="680" y="285" text-anchor="middle" font-size="8" fill="#8a8580">60</text>
+  <text x="720" y="285" text-anchor="middle" font-size="8" fill="#8a8580">85</text>
+
+  <!-- Exponential curve -->
+  <path d="M 500 262 L 545 258 L 590 248 L 635 220 L 680 160 L 720 100" stroke="#d35050" stroke-width="2.5" fill="none"/>
+
+  <!-- Automotive range highlight -->
+  <rect x="495" y="90" width="230" height="180" rx="0" fill="#d35050" opacity="0.05" stroke="#d35050" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="610" y="108" text-anchor="middle" font-size="9" fill="#d35050">車用工作溫度範圍</text>
+  <text x="610" y="122" text-anchor="middle" font-size="9" fill="#d35050">-40°C ~ +85°C</text>
+
+  <!-- Mobile range -->
+  <rect x="580" y="195" width="70" height="80" rx="0" fill="#5060b0" opacity="0.08" stroke="#5060b0" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="615" y="248" text-anchor="middle" font-size="8" fill="#5060b0">手機</text>
+  <text x="615" y="260" text-anchor="middle" font-size="8" fill="#5060b0">0~45°C</text>
+
+  <!-- Key Points Below -->
+  <rect x="430" y="315" width="330" height="190" rx="6" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <text x="595" y="338" text-anchor="middle" font-size="12" font-weight="bold" fill="#5a5550">車用 NR 關鍵挑戰</text>
+  <line x1="450" y1="345" x2="740" y2="345" stroke="#d5cec7" stroke-width="1"/>
+  <text x="455" y="367" font-size="10" fill="#d35050">① LED Flicker 與 TNR 交互作用</text>
+  <text x="455" y="387" font-size="10" fill="#d35050">② 遠距小物體不可被平滑消除</text>
+  <text x="455" y="407" font-size="10" fill="#d35050">③ -40°C~+85°C 寬溫度範圍噪聲變化</text>
+  <text x="455" y="427" font-size="10" fill="#d35050">④ NIR/IR 感測器的特殊噪聲特性</text>
+  <text x="455" y="447" font-size="10" fill="#d35050">⑤ ISO 26262 功能安全要求</text>
+  <text x="455" y="467" font-size="10" fill="#d35050">⑥ 低延遲要求 (&lt; 1 frame)</text>
+  <text x="455" y="487" font-size="10" fill="#d35050">⑦ 長壽命 (&gt;10年) 噪聲退化</text>
+</svg>
+<div class="caption">圖 3-21：車用相機 NR 需求雷達圖與溫度-噪聲關係曲線</div>
+</div>
+
+<h3>功能安全 (ISO 26262) 對 NR 的要求</h3>
+<p>在 ADAS/AD 系統中，ISP 屬於安全關鍵路徑。NR 模組的設計必須滿足 <strong>ISO 26262</strong> 功能安全標準：</p>
+<ul>
+<li><strong>確定性行為（Deterministic Behavior）</strong>：NR 輸出必須在給定相同輸入時產生完全相同的結果。禁止使用隨機化演算法。</li>
+<li><strong>失效安全（Fail-Safe）</strong>：NR 模組出錯時必須能被檢測到，且系統能安全降級（例如 Bypass NR 直出原始影像）。</li>
+<li><strong>延遲上限保證</strong>：NR 的最大處理延遲必須有確定的上界，不能有不可預測的 Stall。</li>
+<li><strong>不可隱藏障礙物</strong>：NR 不得將路面上的小障礙物（如人、動物、碎片）模糊到不可檢測的程度。</li>
+</ul>
+
+<h3>LED Flicker 與 TNR 交互</h3>
+<p>LED 交通號誌和 LED 車燈以特定頻率閃爍（通常 50/60/90 Hz 或 PWM 驅動的更高頻率）。當攝影機的曝光時間和 LED 頻率不同步時，LED 在不同幀中的亮度會週期性變化，這就是 <strong>LED Flicker</strong>。</p>
+
+<p>LED Flicker 對 TNR 的影響極為嚴重：TNR 會將 LED 亮度變化視為「運動」，導致：</p>
+<ul>
+<li>LED 區域的 TNR Alpha 被調高（減弱時域降噪），該區域噪聲增加</li>
+<li>或者 TNR 試圖平均不同亮度的 LED 幀，導致 LED 變暗或閃爍被錯誤平滑</li>
+</ul>
+
+<div class="info-box warn">
+<div class="box-title">⚠️ 注意</div>
+<p>在車用 ISP 中，TNR 必須能感知 LED Flicker 並做特殊處理。常見策略包括：(1) 在 LED Flicker Detection 模組檢測到閃爍的區域，強制 TNR Alpha = 1.0（不做時域融合）；(2) 使用 LED Flicker Mitigation（LFM）曝光策略，將一幀分為多個短曝光子幀，確保每個子幀都能捕捉到 LED 的完整週期。TNR 在 LFM 模式下需要特殊的融合策略。</p>
+</div>
+
+<h3>遠距小物體保護</h3>
+<p>在高速公路場景中，前方 100~200 米的行人或動物在影像中可能只佔 <strong>5~10 個像素</strong>。過度的空間 NR 會將這些小目標與背景融合，導致後端的 Object Detection 演算法無法檢測到。</p>
+
+<p>保護策略：</p>
+<ul>
+<li><strong>限制 NR Kernel Size</strong>：車用 ISP 的 NR Kernel 通常不超過 5×5，避免大範圍平滑</li>
+<li><strong>Small Object Detector</strong>：在 NR 前檢測高對比度的小區域，對這些區域降低 NR 強度</li>
+<li><strong>降低遠場 NR</strong>：根據影像的垂直位置（遠場在影像上方）自適應調整 NR 強度</li>
+</ul>
+
+<h3>寬溫度範圍噪聲挑戰</h3>
+<p>車用感測器的工作溫度範圍為 <strong>-40°C ~ +85°C</strong>，遠超手機的 0°C ~ 45°C。Dark Current 與溫度呈指數關係：+85°C 時的 Dark Current 可能是 25°C 時的 <strong>64 倍</strong>（每 8°C 翻倍，60°C 差 = 7.5 次翻倍）。</p>
+
+<p>這意味著車用 NR 必須具備極大的動態範圍調整能力。NR 參數表不僅需要按 ISO 索引，還需要按<strong>感測器溫度</strong>索引。硬體需要從溫度感測器讀取數據，選擇對應的 NR 參數集。</p>
+
+<h3>NIR 感測器的 NR</h3>
+<p>車用 Night Vision 系統常使用 NIR（Near-Infrared）感測器。NIR 感測器的噪聲特性與可見光感測器不同：</p>
+<ul>
+<li>NIR 像素的量子效率較低，Shot Noise 更顯著</li>
+<li>NIR 影像通常是單色（灰度），無需 Chroma NR</li>
+<li>NIR 場景的動態範圍較窄，NR 參數可以更簡化</li>
+</ul>
+
+<div class="info-box key">
+<div class="box-title">重點</div>
+<p>車用 NR 設計的核心原則是<strong>「寧可留噪聲，不可丟資訊」</strong>。在手機上，用戶期望看到「乾淨」的影像；但在車用場景中，一個被 NR 消除的行人可能造成致命後果。因此，車用 NR 的 Tuning 通常比手機保守得多，NR 強度更低，Edge/Small Object 保護更激進。部分 ADAS 系統甚至直接使用 RAW 數據做 AI 推理，完全繞過 NR。</p>
+</div>
+`
+    },
+    {
+      id: "ch3_22",
+      title: "多幀降噪 MFNR 與 HDR-NR 聯合處理",
+      content: `
+<p>多幀降噪（Multi-Frame Noise Reduction, MFNR）是現代手機相機夜景模式的核心技術。透過連續拍攝多幀影像，對齊（Align）後融合（Merge），利用多幀的統計優勢將噪聲降低 √N 倍（N 為幀數）。當 MFNR 與 HDR 結合時，可以同時擴展動態範圍並降噪，這是計算攝影（Computational Photography）的精髓。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 780 480" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <rect width="780" height="480" fill="#f5f0eb" rx="8"/>
+  <text x="390" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a5550">MFNR Pipeline: Align → Merge → Denoise</text>
+  <defs>
+    <marker id="arrNR22" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6a8a7a"/></marker>
+  </defs>
+
+  <!-- Burst Capture Frames -->
+  <rect x="20" y="50" width="80" height="50" rx="4" fill="white" stroke="#8a8580" stroke-width="1"/>
+  <text x="60" y="80" text-anchor="middle" font-size="9" fill="#5a5550">Frame 1</text>
+  <rect x="25" y="55" width="80" height="50" rx="4" fill="white" stroke="#8a8580" stroke-width="1"/>
+  <text x="65" y="85" text-anchor="middle" font-size="9" fill="#5a5550">Frame 2</text>
+  <rect x="30" y="60" width="80" height="50" rx="4" fill="white" stroke="#8a8580" stroke-width="1"/>
+  <text x="70" y="90" text-anchor="middle" font-size="9" fill="#5a5550">Frame 3</text>
+  <rect x="35" y="65" width="80" height="50" rx="4" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="75" y="88" text-anchor="middle" font-size="9" font-weight="bold" fill="#5a5550">Frame N</text>
+  <text x="60" y="132" text-anchor="middle" font-size="10" fill="#8a8580">Burst: 4~16 幀</text>
+
+  <!-- Reference Frame Selection -->
+  <line x1="115" y1="90" x2="165" y2="90" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR22)"/>
+  <rect x="168" y="55" width="120" height="70" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="228" y="78" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Reference</text>
+  <text x="228" y="93" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Selection</text>
+  <text x="228" y="113" text-anchor="middle" font-size="9" fill="#8a8580">選擇最銳利的幀</text>
+
+  <!-- Alignment -->
+  <line x1="288" y1="90" x2="330" y2="90" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR22)"/>
+  <rect x="333" y="45" width="140" height="90" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="403" y="68" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">Alignment</text>
+  <text x="403" y="85" text-anchor="middle" font-size="9" fill="#5a5550">Global: Homography</text>
+  <text x="403" y="100" text-anchor="middle" font-size="9" fill="#5a5550">Local: Optical Flow</text>
+  <text x="403" y="115" text-anchor="middle" font-size="9" fill="#5a5550">or Block Matching</text>
+  <text x="403" y="128" text-anchor="middle" font-size="8" fill="#8a8580">Sub-pixel accuracy</text>
+
+  <!-- Merge -->
+  <line x1="473" y1="90" x2="515" y2="90" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR22)"/>
+  <rect x="518" y="50" width="120" height="80" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="578" y="73" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">Robust Merge</text>
+  <text x="578" y="90" text-anchor="middle" font-size="9" fill="#5a5550">Weighted Average</text>
+  <text x="578" y="105" text-anchor="middle" font-size="9" fill="#5a5550">Outlier Rejection</text>
+  <text x="578" y="120" text-anchor="middle" font-size="9" fill="#8a8580">Motion → weight ↓</text>
+
+  <!-- Post NR -->
+  <line x1="638" y1="90" x2="670" y2="90" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR22)"/>
+  <rect x="673" y="60" width="90" height="60" rx="6" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="718" y="83" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Post NR</text>
+  <text x="718" y="100" text-anchor="middle" font-size="9" fill="#8a8580">輕度 2D NR</text>
+  <text x="718" y="113" text-anchor="middle" font-size="9" fill="#8a8580">殘餘噪聲</text>
+
+  <!-- SNR Improvement -->
+  <rect x="20" y="160" width="740" height="45" rx="4" fill="#6a8a7a" opacity="0.08" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="390" y="182" text-anchor="middle" font-size="12" fill="#6a8a7a">SNR 改善: 合併 N 幀 → 噪聲降低 √N 倍 → 8 幀 ≈ +9 dB SNR ≈ 等效 ISO 降低 8 倍</text>
+  <text x="390" y="197" text-anchor="middle" font-size="10" fill="#8a8580">例: ISO 6400 拍 8 幀 ≈ ISO 800 的噪聲水平 (理想情況)</text>
+
+  <!-- HDR-NR Joint Processing -->
+  <rect x="20" y="220" width="740" height="240" rx="6" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <text x="390" y="248" text-anchor="middle" font-size="13" font-weight="bold" fill="#5a5550">HDR + NR 聯合處理 Pipeline</text>
+
+  <!-- Multi-exposure frames -->
+  <rect x="40" y="270" width="90" height="35" rx="4" fill="#e8a04a" opacity="0.2" stroke="#e8a04a" stroke-width="1"/>
+  <text x="85" y="292" text-anchor="middle" font-size="9" fill="#5a5550">Short Exp ×4</text>
+  <rect x="40" y="315" width="90" height="35" rx="4" fill="#6a8a7a" opacity="0.2" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="85" y="337" text-anchor="middle" font-size="9" fill="#5a5550">Mid Exp ×4</text>
+  <rect x="40" y="360" width="90" height="35" rx="4" fill="#5060b0" opacity="0.2" stroke="#5060b0" stroke-width="1"/>
+  <text x="85" y="382" text-anchor="middle" font-size="9" fill="#5a5550">Long Exp ×4</text>
+
+  <!-- Arrows to align -->
+  <line x1="130" y1="287" x2="175" y2="330" stroke="#8a8580" stroke-width="1.5" marker-end="url(#arrNR22)"/>
+  <line x1="130" y1="332" x2="175" y2="332" stroke="#8a8580" stroke-width="1.5" marker-end="url(#arrNR22)"/>
+  <line x1="130" y1="377" x2="175" y2="335" stroke="#8a8580" stroke-width="1.5" marker-end="url(#arrNR22)"/>
+
+  <!-- Intra-group align -->
+  <rect x="178" y="310" width="120" height="50" rx="5" fill="white" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="238" y="332" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Align Each</text>
+  <text x="238" y="348" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Exposure Group</text>
+
+  <!-- Intra-group merge -->
+  <line x1="298" y1="335" x2="335" y2="335" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR22)"/>
+  <rect x="338" y="310" width="120" height="50" rx="5" fill="white" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="398" y="330" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">MFNR Merge</text>
+  <text x="398" y="348" text-anchor="middle" font-size="9" fill="#8a8580">per exposure level</text>
+
+  <!-- HDR Merge -->
+  <line x1="458" y1="335" x2="495" y2="335" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR22)"/>
+  <rect x="498" y="310" width="110" height="50" rx="5" fill="white" stroke="#e8a04a" stroke-width="2"/>
+  <text x="553" y="330" text-anchor="middle" font-size="10" font-weight="bold" fill="#e8a04a">HDR Merge</text>
+  <text x="553" y="348" text-anchor="middle" font-size="9" fill="#8a8580">Tone Mapping</text>
+
+  <!-- Final Output -->
+  <line x1="608" y1="335" x2="645" y2="335" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR22)"/>
+  <rect x="648" y="310" width="100" height="50" rx="5" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="698" y="332" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">HDR + NR</text>
+  <text x="698" y="348" text-anchor="middle" font-size="10" font-weight="bold" fill="#5a5550">Output</text>
+
+  <text x="390" y="390" text-anchor="middle" font-size="10" fill="#8a8580">Short: 提供高光細節 (低噪聲) | Mid: 主體曝光 | Long: 提供暗部細節 (高噪聲 → MFNR 降噪)</text>
+  <text x="390" y="410" text-anchor="middle" font-size="10" fill="#6a8a7a" font-weight="bold">關鍵洞察: Long Exposure 幀的噪聲最大 → MFNR 對這些幀的降噪收益最顯著</text>
+
+  <!-- Memory requirement -->
+  <rect x="40" y="425" width="700" height="30" rx="4" fill="#fff3e0" stroke="#e8a04a" stroke-width="1"/>
+  <text x="390" y="445" text-anchor="middle" font-size="10" fill="#e8a04a">⚠ 記憶體需求: 12 幀 × 12MP × 12-bit = 12 × 18MB = 216 MB DRAM (巨大!)</text>
+</svg>
+<div class="caption">圖 3-22：MFNR Pipeline 與 HDR-NR 聯合處理架構</div>
+</div>
+
+<h3>MFNR Alignment 硬體實現</h3>
+<p>影像對齊是 MFNR 中最具挑戰性的環節。由於手持拍攝時手震、場景中有運動物體，幀間存在全局和局部的位移。對齊分為兩級：</p>
+
+<p><strong>Global Alignment</strong>：使用加速度計/陀螺儀（IMU）數據或影像特徵點匹配，計算全局 Homography 變換（8 參數）。硬體上常使用專用的 <strong>Feature Detector + Descriptor + Matcher</strong> Pipeline，或直接利用 ME 引擎的全域 MV 估計。</p>
+
+<p><strong>Local Alignment</strong>：全局對齊後，仍然存在局部的非剛體運動（如樹葉搖擺、行人走動）。使用 <strong>Dense Optical Flow</strong> 或 <strong>Block-based Local Motion</strong> 進行像素級或 Block 級的精細對齊。這需要大量的 DRAM 頻寬（讀取多幀資料進行匹配）。</p>
+
+<h3>Robust Merge</h3>
+<p>合併階段必須處理<strong>對齊失敗</strong>的情況（如遮擋、新出現的物體）。Robust Merge 的核心是為每個像素計算<strong>融合權重</strong>：</p>
+
+<div class="formula">MergedPixel = Σ w_i × AlignedFrame_i / Σ w_i</div>
+
+<p>權重 w_i 根據以下因素計算：</p>
+<ul>
+<li><strong>對齊誤差</strong>：與參考幀的殘差越大，權重越低（Outlier Rejection）</li>
+<li><strong>噪聲水平</strong>：噪聲較大的幀權重較低</li>
+<li><strong>曝光量</strong>：在 HDR 場景中，飽和或欠曝的像素權重降低</li>
+</ul>
+
+<h3>Reference Frame Buffer 管理</h3>
+<p>MFNR 需要將多幀影像暫存在 DRAM 中。對於 12MP 12-bit RAW，每幀 ~18 MB。8 幀 = 144 MB。這是一筆龐大的記憶體開銷。優化策略：</p>
+<ul>
+<li><strong>Progressive Merge</strong>：不儲存所有幀，而是每收到一幀就立即與累積結果融合。只需 2 幀 Buffer（當前幀 + 累積結果）。缺點是無法回溯最佳參考幀。</li>
+<li><strong>Lossy Compression</strong>：對暫存幀進行 2:1 或 4:1 壓縮。增加少量壓縮 Artifact，但大幅降低記憶體需求。</li>
+<li><strong>降解析度對齊</strong>：Motion Estimation 在 1/4 或 1/8 解析度上進行，MV 再上採樣到全解析度，節省 ME 階段的頻寬。</li>
+</ul>
+
+<div class="info-box example">
+<div class="box-title">📝 範例</div>
+<p>Google Night Sight 的做法（以 Pixel 手機為例）：</p>
+<pre>
+拍攝策略:
+  - 低光場景: 15 幀 × 短曝光 (避免手震)
+  - 極暗場景: 6 幀 × 長曝光 (最大化進光量)
+
+處理流程:
+  1. 選擇最銳利的幀作為 Reference
+  2. Global alignment (Homography)
+  3. Tile-based local alignment (Optical Flow)
+  4. Robust merge with per-pixel weights
+  5. 輕度 spatial NR 處理殘餘噪聲
+  6. Tone mapping + 色彩增強
+
+等效效果: ISO 6400 × 15 幀 ≈ ISO 430 的噪聲品質
+</pre>
+</div>
+
+<div class="info-box key">
+<div class="box-title">重點</div>
+<p>MFNR 在硬體 ISP 中的實現通常需要專用的 Hardware Accelerator（如 Google 的 Pixel Visual Core / Tensor ISP）。純軟體 MFNR 在手機 AP 上通常需要 1~3 秒處理時間（取決於幀數和解析度），因此硬體加速對用戶體驗至關重要。硬體 MFNR 的設計重點是 Motion Estimation Engine 的吞吐量和 DRAM Controller 的高效率 Burst Access。</p>
+</div>
+`
+    },
+    {
+      id: "ch3_23",
+      title: "NR 品質評估方法與 Debug 技巧",
+      content: `
+<p>降噪效果的品質評估是 ISP Tuning 和 Debug 的核心環節。客觀指標（Objective Metrics）和主觀評估（Subjective Evaluation）缺一不可。本節系統化地介紹 NR 品質評估的方法論以及常見問題的 Debug 流程。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 780 520" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <rect width="780" height="520" fill="#f5f0eb" rx="8"/>
+  <text x="390" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a5550">NR Debug Flowchart: 症狀 → 檢查 → 根因 → 修復</text>
+
+  <!-- Start -->
+  <rect x="320" y="48" width="140" height="35" rx="17" fill="#6a8a7a" opacity="0.3" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="390" y="70" text-anchor="middle" font-size="11" font-weight="bold" fill="#5a5550">發現 NR 問題</text>
+  <line x1="390" y1="83" x2="390" y2="108" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR23)"/>
+
+  <defs>
+    <marker id="arrNR23" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6a8a7a"/></marker>
+  </defs>
+
+  <!-- Symptom Classification -->
+  <rect x="290" y="111" width="200" height="35" rx="4" fill="white" stroke="#5060b0" stroke-width="2"/>
+  <text x="390" y="133" text-anchor="middle" font-size="11" font-weight="bold" fill="#5060b0">識別症狀類型</text>
+
+  <!-- Branch to symptoms -->
+  <line x1="290" y1="128" x2="50" y2="175" stroke="#8a8580" stroke-width="1.5"/>
+  <line x1="340" y1="146" x2="200" y2="175" stroke="#8a8580" stroke-width="1.5"/>
+  <line x1="440" y1="146" x2="400" y2="175" stroke="#8a8580" stroke-width="1.5"/>
+  <line x1="490" y1="128" x2="590" y2="175" stroke="#8a8580" stroke-width="1.5"/>
+
+  <!-- Symptom 1: Over-smoothing -->
+  <rect x="15" y="178" width="130" height="50" rx="4" fill="#fff3e0" stroke="#e8a04a" stroke-width="1.5"/>
+  <text x="80" y="198" text-anchor="middle" font-size="10" font-weight="bold" fill="#e8a04a">過度模糊</text>
+  <text x="80" y="215" text-anchor="middle" font-size="9" fill="#5a5550">Over-smoothing</text>
+  <line x1="80" y1="228" x2="80" y2="258" stroke="#e8a04a" stroke-width="1.5" marker-end="url(#arrNR23)"/>
+
+  <rect x="15" y="261" width="130" height="70" rx="4" fill="white" stroke="#e8a04a" stroke-width="1"/>
+  <text x="80" y="278" text-anchor="middle" font-size="9" font-weight="bold" fill="#e8a04a">檢查項目:</text>
+  <text x="25" y="295" font-size="8" fill="#5a5550">• NR σ_r 太大?</text>
+  <text x="25" y="308" font-size="8" fill="#5a5550">• Edge threshold 太高?</text>
+  <text x="25" y="321" font-size="8" fill="#5a5550">• TNR α_min 太小?</text>
+
+  <line x1="80" y1="331" x2="80" y2="356" stroke="#e8a04a" stroke-width="1.5" marker-end="url(#arrNR23)"/>
+  <rect x="15" y="359" width="130" height="55" rx="4" fill="#e8a04a" opacity="0.1" stroke="#e8a04a" stroke-width="1"/>
+  <text x="80" y="376" text-anchor="middle" font-size="9" font-weight="bold" fill="#e8a04a">修復:</text>
+  <text x="25" y="393" font-size="8" fill="#5a5550">• 降低 NR strength</text>
+  <text x="25" y="406" font-size="8" fill="#5a5550">• 調低 edge threshold</text>
+
+  <!-- Symptom 2: Worm/Smearing -->
+  <rect x="160" y="178" width="130" height="50" rx="4" fill="#fce4ec" stroke="#d35050" stroke-width="1.5"/>
+  <text x="225" y="198" text-anchor="middle" font-size="10" font-weight="bold" fill="#d35050">蟲狀紋路</text>
+  <text x="225" y="215" text-anchor="middle" font-size="9" fill="#5a5550">Worm Artifact</text>
+  <line x1="225" y1="228" x2="225" y2="258" stroke="#d35050" stroke-width="1.5" marker-end="url(#arrNR23)"/>
+
+  <rect x="160" y="261" width="130" height="70" rx="4" fill="white" stroke="#d35050" stroke-width="1"/>
+  <text x="225" y="278" text-anchor="middle" font-size="9" font-weight="bold" fill="#d35050">檢查項目:</text>
+  <text x="170" y="295" font-size="8" fill="#5a5550">• Bilateral σ_r/σ_s 比?</text>
+  <text x="170" y="308" font-size="8" fill="#5a5550">• Kernel 太大?</text>
+  <text x="170" y="321" font-size="8" fill="#5a5550">• 量化位寬不足?</text>
+
+  <line x1="225" y1="331" x2="225" y2="356" stroke="#d35050" stroke-width="1.5" marker-end="url(#arrNR23)"/>
+  <rect x="160" y="359" width="130" height="55" rx="4" fill="#d35050" opacity="0.1" stroke="#d35050" stroke-width="1"/>
+  <text x="225" y="376" text-anchor="middle" font-size="9" font-weight="bold" fill="#d35050">修復:</text>
+  <text x="170" y="393" font-size="8" fill="#5a5550">• 增大 σ_s/σ_r 比</text>
+  <text x="170" y="406" font-size="8" fill="#5a5550">• 減小 kernel size</text>
+
+  <!-- Symptom 3: Ghost -->
+  <rect x="340" y="178" width="130" height="50" rx="4" fill="#e8eaf6" stroke="#5060b0" stroke-width="1.5"/>
+  <text x="405" y="198" text-anchor="middle" font-size="10" font-weight="bold" fill="#5060b0">鬼影殘留</text>
+  <text x="405" y="215" text-anchor="middle" font-size="9" fill="#5a5550">Ghosting</text>
+  <line x1="405" y1="228" x2="405" y2="258" stroke="#5060b0" stroke-width="1.5" marker-end="url(#arrNR23)"/>
+
+  <rect x="340" y="261" width="130" height="70" rx="4" fill="white" stroke="#5060b0" stroke-width="1"/>
+  <text x="405" y="278" text-anchor="middle" font-size="9" font-weight="bold" fill="#5060b0">檢查項目:</text>
+  <text x="350" y="295" font-size="8" fill="#5a5550">• ME 精度足夠?</text>
+  <text x="350" y="308" font-size="8" fill="#5a5550">• Ghost detect 開啟?</text>
+  <text x="350" y="321" font-size="8" fill="#5a5550">• Scene change detect?</text>
+
+  <line x1="405" y1="331" x2="405" y2="356" stroke="#5060b0" stroke-width="1.5" marker-end="url(#arrNR23)"/>
+  <rect x="340" y="359" width="130" height="55" rx="4" fill="#5060b0" opacity="0.1" stroke="#5060b0" stroke-width="1"/>
+  <text x="405" y="376" text-anchor="middle" font-size="9" font-weight="bold" fill="#5060b0">修復:</text>
+  <text x="350" y="393" font-size="8" fill="#5a5550">• 增大 motion threshold</text>
+  <text x="350" y="406" font-size="8" fill="#5a5550">• 啟用 ghost detection</text>
+
+  <!-- Symptom 4: Color Shift -->
+  <rect x="530" y="178" width="130" height="50" rx="4" fill="#e8f5e9" stroke="#4caf50" stroke-width="1.5"/>
+  <text x="595" y="198" text-anchor="middle" font-size="10" font-weight="bold" fill="#4caf50">色彩偏移</text>
+  <text x="595" y="215" text-anchor="middle" font-size="9" fill="#5a5550">Color Shift</text>
+  <line x1="595" y1="228" x2="595" y2="258" stroke="#4caf50" stroke-width="1.5" marker-end="url(#arrNR23)"/>
+
+  <rect x="530" y="261" width="130" height="70" rx="4" fill="white" stroke="#4caf50" stroke-width="1"/>
+  <text x="595" y="278" text-anchor="middle" font-size="9" font-weight="bold" fill="#4caf50">檢查項目:</text>
+  <text x="540" y="295" font-size="8" fill="#5a5550">• RAW NR 跨色干擾?</text>
+  <text x="540" y="308" font-size="8" fill="#5a5550">• Chroma NR 太強?</text>
+  <text x="540" y="321" font-size="8" fill="#5a5550">• NR 前後 WB 一致?</text>
+
+  <line x1="595" y1="331" x2="595" y2="356" stroke="#4caf50" stroke-width="1.5" marker-end="url(#arrNR23)"/>
+  <rect x="530" y="359" width="130" height="55" rx="4" fill="#4caf50" opacity="0.1" stroke="#4caf50" stroke-width="1"/>
+  <text x="595" y="376" text-anchor="middle" font-size="9" font-weight="bold" fill="#4caf50">修復:</text>
+  <text x="540" y="393" font-size="8" fill="#5a5550">• 分通道 NR 參數</text>
+  <text x="540" y="406" font-size="8" fill="#5a5550">• 降低 Chroma NR</text>
+
+  <!-- Quality Metrics Summary -->
+  <rect x="20" y="430" width="740" height="80" rx="6" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <text x="390" y="452" text-anchor="middle" font-size="12" font-weight="bold" fill="#5a5550">客觀品質指標</text>
+  <text x="100" y="475" text-anchor="middle" font-size="10" fill="#6a8a7a" font-weight="bold">PSNR</text>
+  <text x="100" y="492" text-anchor="middle" font-size="9" fill="#5a5550">整體噪聲量化</text>
+  <text x="100" y="505" text-anchor="middle" font-size="9" fill="#8a8580">&gt;38dB: 優秀</text>
+  <text x="280" y="475" text-anchor="middle" font-size="10" fill="#6a8a7a" font-weight="bold">SSIM</text>
+  <text x="280" y="492" text-anchor="middle" font-size="9" fill="#5a5550">結構保持度</text>
+  <text x="280" y="505" text-anchor="middle" font-size="9" fill="#8a8580">&gt;0.95: 優秀</text>
+  <text x="460" y="475" text-anchor="middle" font-size="10" fill="#6a8a7a" font-weight="bold">Texture Ratio</text>
+  <text x="460" y="492" text-anchor="middle" font-size="9" fill="#5a5550">紋理保持比例</text>
+  <text x="460" y="505" text-anchor="middle" font-size="9" fill="#8a8580">&gt;0.80: 良好</text>
+  <text x="640" y="475" text-anchor="middle" font-size="10" fill="#6a8a7a" font-weight="bold">Visual Noise</text>
+  <text x="640" y="492" text-anchor="middle" font-size="9" fill="#5a5550">Dead Leaves 分析</text>
+  <text x="640" y="505" text-anchor="middle" font-size="9" fill="#8a8580">ISO 19567 標準</text>
+</svg>
+<div class="caption">圖 3-23：NR Debug 流程圖——從症狀到根因到修復</div>
+</div>
+
+<h3>客觀品質指標</h3>
+<p>NR 品質的客觀評估需要<strong>參考影像（Ground Truth）</strong>。在實驗室環境中，可以使用多幀平均作為近似的無噪聲參考。常用指標：</p>
+
+<p><strong>PSNR（Peak Signal-to-Noise Ratio）</strong>：</p>
+<div class="formula">PSNR = 10 × log₁₀(MAX² / MSE)  [dB]</div>
+<p>PSNR 反映整體降噪效果，但對局部結構破壞不敏感。一般來說，NR 後 PSNR 提升 3~6 dB 為合理範圍。</p>
+
+<p><strong>SSIM（Structural Similarity Index）</strong>：</p>
+<div class="formula">SSIM = f(luminance, contrast, structure)</div>
+<p>SSIM 比 PSNR 更符合人類視覺感知，能反映結構資訊的保持程度。NR 後 SSIM 值應 > 0.95。</p>
+
+<p><strong>Texture Preservation Ratio</strong>：在 Dead Leaves Chart 或 ISO 12233 Chart 的紋理區域，比較 NR 前後的對比度保留率。理想值 > 0.8（保留 80% 以上的紋理對比度）。</p>
+
+<h3>視覺噪聲測量</h3>
+<p>使用標準測試圖卡的定量分析：</p>
+<ul>
+<li><strong>Uniform Patch Analysis</strong>：拍攝灰卡，在均勻區域測量像素變異數（Variance），這就是直接的噪聲量化。</li>
+<li><strong>Dead Leaves Chart</strong>（ISO 19567）：一種包含多尺度圓盤的測試圖案，可以同時評估降噪和紋理保持。NR 後的 Dead Leaves MTF 與原始 MTF 的比值反映紋理損失。</li>
+<li><strong>Siemens Star</strong>：評估 NR 對不同方向和頻率紋理的影響。</li>
+</ul>
+
+<h3>常見 NR Artifact 與根因分析</h3>
+<table>
+<tr><th>Artifact</th><th>視覺表現</th><th>常見根因</th><th>解決方向</th></tr>
+<tr><td>Worm Artifact</td><td>蟲狀/蠕蟲狀紋路</td><td>Bilateral σ_r 太大，把噪聲「連接」成條狀</td><td>降低 σ_r，增加 σ_s</td></tr>
+<tr><td>Over-smoothing</td><td>蠟像感，失去皮膚紋理</td><td>NR 強度過高，Edge threshold 太高</td><td>降低 NR，調低 threshold</td></tr>
+<tr><td>Ghosting</td><td>運動物體有半透明殘影</td><td>TNR motion detection 失敗</td><td>改善 ME，增強 ghost detection</td></tr>
+<tr><td>Smearing</td><td>細節被「拖曳」/模糊</td><td>TNR 在運動邊緣的 blending 不當</td><td>銳化 motion-alpha 曲線</td></tr>
+<tr><td>Banding</td><td>漸層區域出現階梯</td><td>量化位寬不足或 NR 後 Dithering 缺失</td><td>增加中間位寬，加 Dithering</td></tr>
+<tr><td>Color Bleeding</td><td>色彩在邊緣滲透</td><td>Chroma NR kernel 跨越亮度邊界</td><td>Chroma NR 使用 Luma-guided</td></tr>
+</table>
+
+<h3>Debug 方法論</h3>
+<p>系統化的 NR Debug 流程：</p>
+<ol>
+<li><strong>隔離問題</strong>：逐一 Bypass 各 NR Stage（RAW NR → TNR → YUV NR），確認問題源自哪個 Stage</li>
+<li><strong>Dump 中間結果</strong>：輸出每個 NR Stage 的輸入和輸出影像，對比觀察</li>
+<li><strong>檢查 NR Strength Map</strong>：Dump Edge Map / NR Strength Map，確認區域分類是否正確</li>
+<li><strong>驗證噪聲模型</strong>：用 Flat Patch 驗證 NLF 是否準確，NR 強度是否匹配實際噪聲水平</li>
+<li><strong>Bit-accurate 比對</strong>：將硬體輸出與軟體 Golden Model 比對，確認硬體實現無誤</li>
+</ol>
+
+<div class="info-box tip">
+<div class="box-title">💡 提示</div>
+<p>一個非常實用的 Debug 技巧是製作 <strong>NR Delta Map</strong>：將 NR 輸入減去 NR 輸出（Delta = Input − Output），觀察 NR 實際移除了什麼。理想的 Delta Map 應該只包含噪聲，不應該包含可辨識的結構或邊緣。如果 Delta Map 中看到了清晰的紋理或邊緣，說明 NR 過度移除了有用資訊。這是最直觀的 Over-smoothing 檢測方法。</p>
+</div>
+`
+    },
+    {
+      id: "ch3_24",
+      title: "下一代 NR 技術趨勢",
+      content: `
+<p>隨著半導體製程進步、AI 加速器普及、以及感測器技術革新，降噪技術正在經歷從傳統信號處理到 AI 驅動的根本性變革。本節探討 NR 技術的未來發展方向及其對 ISP 架構的影響。</p>
+
+<div class="diagram">
+<svg viewBox="0 0 780 520" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <rect width="780" height="520" fill="#f5f0eb" rx="8"/>
+  <text x="390" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#5a5550">下一代 NR 架構：Classic + AI Hybrid</text>
+  <defs>
+    <marker id="arrNR24" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6a8a7a"/></marker>
+  </defs>
+
+  <!-- Sensor Layer -->
+  <rect x="20" y="50" width="740" height="80" rx="6" fill="white" stroke="#d5cec7" stroke-width="1.5"/>
+  <text x="390" y="70" text-anchor="middle" font-size="12" font-weight="bold" fill="#5a5550">感測器層 (Sensor Level NR)</text>
+  <rect x="40" y="82" width="150" height="35" rx="4" fill="#6a8a7a" opacity="0.12" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="115" y="104" text-anchor="middle" font-size="9" fill="#5a5550">CDS (kTC Noise Cancel)</text>
+  <rect x="210" y="82" width="150" height="35" rx="4" fill="#6a8a7a" opacity="0.12" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="285" y="104" text-anchor="middle" font-size="9" fill="#5a5550">In-pixel Noise Cancel</text>
+  <rect x="380" y="82" width="170" height="35" rx="4" fill="#6a8a7a" opacity="0.12" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="465" y="104" text-anchor="middle" font-size="9" fill="#5a5550">Stacked Sensor + ISP Die</text>
+  <rect x="570" y="82" width="170" height="35" rx="4" fill="#6a8a7a" opacity="0.12" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="655" y="104" text-anchor="middle" font-size="9" fill="#5a5550">QIS (Quanta Image Sensor)</text>
+
+  <!-- Classical ISP NR -->
+  <line x1="390" y1="130" x2="390" y2="155" stroke="#6a8a7a" stroke-width="2" marker-end="url(#arrNR24)"/>
+  <rect x="20" y="158" width="350" height="120" rx="6" fill="white" stroke="#6a8a7a" stroke-width="2"/>
+  <text x="195" y="180" text-anchor="middle" font-size="12" font-weight="bold" fill="#6a8a7a">Classical ISP NR</text>
+  <rect x="40" y="192" width="100" height="30" rx="4" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="90" y="211" text-anchor="middle" font-size="9" fill="#5a5550">RAW 2D NR</text>
+  <rect x="155" y="192" width="100" height="30" rx="4" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="205" y="211" text-anchor="middle" font-size="9" fill="#5a5550">3D TNR</text>
+  <rect x="40" y="232" width="100" height="30" rx="4" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="90" y="251" text-anchor="middle" font-size="9" fill="#5a5550">YUV NR</text>
+  <rect x="155" y="232" width="100" height="30" rx="4" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="205" y="251" text-anchor="middle" font-size="9" fill="#5a5550">Edge NR</text>
+  <text x="310" y="255" font-size="9" fill="#8a8580">低功耗</text>
+  <text x="310" y="268" font-size="9" fill="#8a8580">確定性</text>
+
+  <!-- AI NR Accelerator -->
+  <rect x="410" y="158" width="350" height="120" rx="6" fill="white" stroke="#e8a04a" stroke-width="2"/>
+  <text x="585" y="180" text-anchor="middle" font-size="12" font-weight="bold" fill="#e8a04a">AI-NR Accelerator</text>
+  <rect x="430" y="192" width="130" height="30" rx="4" fill="#e8a04a" opacity="0.15" stroke="#e8a04a" stroke-width="1"/>
+  <text x="495" y="211" text-anchor="middle" font-size="9" fill="#5a5550">NPU (Neural Engine)</text>
+  <rect x="575" y="192" width="130" height="30" rx="4" fill="#e8a04a" opacity="0.15" stroke="#e8a04a" stroke-width="1"/>
+  <text x="640" y="211" text-anchor="middle" font-size="9" fill="#5a5550">DSP (Hexagon/CVP)</text>
+  <rect x="430" y="232" width="280" height="30" rx="4" fill="#e8a04a" opacity="0.15" stroke="#e8a04a" stroke-width="1"/>
+  <text x="570" y="251" text-anchor="middle" font-size="9" fill="#5a5550">CNN / Transformer based Denoising Model</text>
+  <text x="730" y="268" font-size="9" fill="#8a8580">高品質</text>
+  <text x="730" y="281" font-size="9" fill="#8a8580">高功耗</text>
+
+  <!-- Hybrid Controller -->
+  <line x1="195" y1="278" x2="390" y2="315" stroke="#6a8a7a" stroke-width="1.5"/>
+  <line x1="585" y1="278" x2="390" y2="315" stroke="#e8a04a" stroke-width="1.5"/>
+  <rect x="300" y="310" width="180" height="50" rx="6" fill="white" stroke="#5060b0" stroke-width="2"/>
+  <text x="390" y="332" text-anchor="middle" font-size="11" font-weight="bold" fill="#5060b0">Hybrid Controller</text>
+  <text x="390" y="350" text-anchor="middle" font-size="9" fill="#8a8580">場景自適應切換/融合</text>
+
+  <!-- Scene-based routing -->
+  <line x1="390" y1="360" x2="390" y2="385" stroke="#5060b0" stroke-width="2" marker-end="url(#arrNR24)"/>
+
+  <rect x="30" y="388" width="720" height="115" rx="6" fill="white" stroke="#d5cec7" stroke-width="1"/>
+  <text x="390" y="410" text-anchor="middle" font-size="12" font-weight="bold" fill="#5a5550">場景自適應策略</text>
+
+  <rect x="50" y="420" width="140" height="70" rx="4" fill="#6a8a7a" opacity="0.08" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="120" y="440" text-anchor="middle" font-size="10" font-weight="bold" fill="#6a8a7a">Preview / Video</text>
+  <text x="120" y="458" text-anchor="middle" font-size="9" fill="#5a5550">Classic NR only</text>
+  <text x="120" y="475" text-anchor="middle" font-size="9" fill="#8a8580">低延遲，低功耗</text>
+
+  <rect x="210" y="420" width="140" height="70" rx="4" fill="#e8a04a" opacity="0.08" stroke="#e8a04a" stroke-width="1"/>
+  <text x="280" y="440" text-anchor="middle" font-size="10" font-weight="bold" fill="#e8a04a">Night Capture</text>
+  <text x="280" y="458" text-anchor="middle" font-size="9" fill="#5a5550">MFNR + AI-NR</text>
+  <text x="280" y="475" text-anchor="middle" font-size="9" fill="#8a8580">最高品質</text>
+
+  <rect x="370" y="420" width="140" height="70" rx="4" fill="#5060b0" opacity="0.08" stroke="#5060b0" stroke-width="1"/>
+  <text x="440" y="440" text-anchor="middle" font-size="10" font-weight="bold" fill="#5060b0">Standard Photo</text>
+  <text x="440" y="458" text-anchor="middle" font-size="9" fill="#5a5550">Classic + Light AI</text>
+  <text x="440" y="475" text-anchor="middle" font-size="9" fill="#8a8580">品質/效率平衡</text>
+
+  <rect x="530" y="420" width="200" height="70" rx="4" fill="#d35050" opacity="0.08" stroke="#d35050" stroke-width="1"/>
+  <text x="630" y="440" text-anchor="middle" font-size="10" font-weight="bold" fill="#d35050">Automotive ADAS</text>
+  <text x="630" y="458" text-anchor="middle" font-size="9" fill="#5a5550">Classic NR + Safety Monitor</text>
+  <text x="630" y="475" text-anchor="middle" font-size="9" fill="#8a8580">確定性 + 功能安全</text>
+</svg>
+<div class="caption">圖 3-24：下一代混合式 NR 架構——Classical ISP + AI Accelerator</div>
+</div>
+
+<h3>AI-NR 硬體加速器</h3>
+<p>AI-based Denoising（如 DnCNN、FFDNet、NAFNet）在品質上已經大幅超越傳統方法，但其計算量也遠超傳統 NR。一個典型的 AI Denoiser（如 NAFNet-width32）的計算量約為 <strong>50~200 GFLOPS</strong>（處理一幀 12MP 影像），而傳統 Bilateral Filter 約為 2~5 GFLOPS。</p>
+
+<p>AI-NR 的硬體加速依賴於：</p>
+<ul>
+<li><strong>NPU（Neural Processing Unit）</strong>：如 Apple Neural Engine、Qualcomm Hexagon NPU、Google Tensor TPU。專為卷積和矩陣乘法優化，算力可達 10~40 TOPS。</li>
+<li><strong>ISP 內嵌 CNN 加速器</strong>：部分 ISP 在 Pipeline 中直接嵌入小型 CNN 加速器，用於即時 AI-NR。</li>
+<li><strong>DSP + AI</strong>：使用 DSP 執行量化的 AI 模型（INT8/INT4），兼顧靈活性和效率。</li>
+</ul>
+
+<h3>Hybrid Classical + AI Pipeline</h3>
+<p>完全用 AI 取代傳統 NR 在短期內不現實（功耗和延遲限制）。主流趨勢是<strong>混合式（Hybrid）</strong>架構：</p>
+
+<ul>
+<li><strong>Classical NR 處理即時串流</strong>（Preview、Video Recording）：低延遲、低功耗、確定性輸出</li>
+<li><strong>AI-NR 用於靜態拍照</strong>（Capture Mode）：允許較高延遲（100ms~1s），追求最佳品質</li>
+<li><strong>場景自適應</strong>：Hybrid Controller 根據場景分析（光照、運動、ISO）決定使用哪種 NR 路徑</li>
+</ul>
+
+<div class="info-box example">
+<div class="box-title">📝 範例</div>
+<p>Apple iPhone 的 Deep Fusion 是 Hybrid NR 的典型實現：</p>
+<pre>
+拍照流程:
+  1. Preview: Classical ISP NR (即時, 低功耗)
+  2. 按下快門: Burst capture 9 幀
+  3. 選擇參考幀 + MFNR alignment (ISP HW)
+  4. Multi-scale AI-NR (Neural Engine)
+     - 分 4 個尺度處理 (multi-scale fusion)
+     - 在每個尺度上進行 CNN denoising
+     - 融合多尺度結果
+  5. 輸出: 合併 MFNR + AI-NR 的最終結果
+
+處理時間: ~1 秒 (Neural Engine ~15 TOPS)
+品質: 在 ISO 1600~6400 範圍大幅超越傳統 NR
+</pre>
+</div>
+
+<h3>Sensor-Level Noise Reduction</h3>
+<p>最根本的降噪方式是在噪聲產生的源頭就消除它。感測器層級的 NR 技術正在快速發展：</p>
+<ul>
+<li><strong>CDS（Correlated Double Sampling）</strong>：已經是標準技術，消除 Reset Noise（kTC Noise）。</li>
+<li><strong>In-Pixel Noise Cancellation</strong>：在像素內部使用差分電路或多次取樣來降低 Read Noise。</li>
+<li><strong>Stacked Sensor with Embedded ISP</strong>：Sony 等廠商推出的堆疊式感測器，在感測器 Die 的邏輯層嵌入 NR 處理單元，直接在感測器輸出前完成初步降噪。優勢是資料在感測器內部處理，避免了 DRAM 讀寫的頻寬和功耗。</li>
+<li><strong>QIS（Quanta Image Sensor）</strong>：下一代感測器概念，每個「Jot」只捕捉 0 或 1 個光子，透過大量過取樣（Oversampling）和數位合成來重建影像。理論上可以達到極低的 Read Noise。</li>
+</ul>
+
+<h3>Computational Photography NR</h3>
+<p>計算攝影模式的 NR 融合了多種技術：</p>
+<ul>
+<li><strong>Night Mode</strong>：長時間 Burst + MFNR + AI-NR + Tone Mapping。</li>
+<li><strong>Astrophotography Mode</strong>：超長曝光（15~60 秒）+ Dark Frame Subtraction + Aggressive NR。</li>
+<li><strong>Semantic-aware NR</strong>：利用 AI Scene Detection 識別場景元素（人臉、天空、植物），對不同語義區域施加不同的 NR 策略。例如，人臉用更精細的 NR 保持膚質，天空用更強的 NR 消除噪點。</li>
+</ul>
+
+<div class="info-box key">
+<div class="box-title">重點</div>
+<p>NR 技術的演進方向是<strong>從「一刀切」到「場景自適應」再到「像素級語義感知」</strong>。傳統 NR 用同一套參數處理整幀影像；ISO-adaptive NR 根據曝光條件調整；Edge-aware NR 區分邊緣和平坦區域；AI-NR 則可以理解影像內容，在語義層面做出最優的降噪/保細節平衡。未來的 ISP 將越來越依賴 AI 來做這些高層決策，而傳統硬體 NR 則專注於低延遲的即時串流處理。</p>
+</div>
+
+<div class="info-box tip">
+<div class="box-title">💡 提示</div>
+<p>對於正在進入 ISP 領域的硬體工程師，建議同時掌握傳統信號處理和 AI/Deep Learning 兩個方向。短期內（3~5 年），傳統 NR 仍是 ISP Pipeline 的核心；但長期來看，AI-NR 將成為影像品質的主要差異化因素。理解兩者的優劣勢和互補性，才能設計出最佳的混合式 NR 架構。學習路徑建議：(1) 熟練掌握傳統 NR（Bilateral, NLM, TNR）→ (2) 理解 CNN/Transformer 基礎 → (3) 學習模型量化和部署（INT8, TFLite）→ (4) 研究 NPU 架構和 AI-NR 硬體映射。</p>
+</div>
+`
     }
   ]
 };
