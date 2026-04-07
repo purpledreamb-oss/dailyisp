@@ -203,6 +203,70 @@ footer p { font-family: 'Cormorant Garamond', serif; font-size: 0.78rem; letter-
 .footer-links a:hover { color: var(--accent); }
 .footer-desc { margin-top: 12px; font-size: 0.72rem; color: var(--text-light); opacity: 0.6; letter-spacing: 1px; }
 
+/* ====== SYNC ====== */
+.sync-section { text-align: center; margin: 2rem 0 1rem; }
+.sync-btn {
+  background: none; border: 1px solid var(--border); color: var(--text-light);
+  padding: 10px 24px; border-radius: 24px; cursor: pointer; font-size: 0.85rem;
+  font-family: 'Noto Sans TC', sans-serif; display: inline-flex; align-items: center; gap: 8px;
+  transition: all 0.3s;
+}
+.sync-btn:hover { border-color: var(--accent); color: var(--accent); }
+.sync-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1000;
+  display: none; align-items: center; justify-content: center; padding: 20px;
+}
+.sync-overlay.open { display: flex; }
+.sync-modal {
+  background: var(--bg); border-radius: 16px; padding: 2rem; max-width: 420px; width: 100%;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15); position: relative;
+}
+.sync-modal h3 { font-family: 'Noto Serif TC', serif; font-size: 1.3rem; margin-bottom: 0.4rem; }
+.sync-desc { font-size: 0.82rem; color: var(--text-light); margin-bottom: 1.2rem; }
+.sync-close {
+  position: absolute; top: 12px; right: 16px; background: none; border: none;
+  font-size: 1.5rem; color: var(--text-light); cursor: pointer;
+}
+.sync-tabs { display: flex; gap: 0; margin-bottom: 1.2rem; border-bottom: 1px solid var(--border); }
+.sync-tab {
+  flex: 1; padding: 10px; background: none; border: none; cursor: pointer;
+  font-family: 'Noto Sans TC', sans-serif; font-size: 0.88rem; color: var(--text-light);
+  border-bottom: 2px solid transparent; transition: all 0.3s;
+}
+.sync-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.sync-hint { font-size: 0.82rem; color: var(--text-light); margin-bottom: 1rem; }
+.sync-action-btn {
+  background: var(--accent); color: #fff; border: none; padding: 10px 28px;
+  border-radius: 8px; cursor: pointer; font-family: 'Noto Sans TC', sans-serif;
+  font-size: 0.88rem; transition: background 0.3s;
+}
+.sync-action-btn:hover { background: var(--accent-light); }
+.sync-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.sync-code-result { margin-top: 1.2rem; text-align: center; }
+.sync-code-display {
+  font-family: 'Cormorant Garamond', serif; font-size: 2.2rem; letter-spacing: 12px;
+  color: var(--accent); font-weight: 600; margin-bottom: 0.8rem; user-select: all;
+}
+.sync-copy-btn {
+  background: none; border: 1px solid var(--border); color: var(--text-light);
+  padding: 6px 20px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;
+  font-family: 'Noto Sans TC', sans-serif; transition: all 0.3s;
+}
+.sync-copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+.sync-note { font-size: 0.75rem; color: var(--text-light); margin-top: 0.8rem; }
+.sync-input-row { display: flex; gap: 10px; align-items: center; }
+.sync-input {
+  flex: 1; padding: 10px 16px; border: 1px solid var(--border); border-radius: 8px;
+  font-family: 'Cormorant Garamond', serif; font-size: 1.4rem; letter-spacing: 8px;
+  text-align: center; background: var(--card-bg); color: var(--text);
+  text-transform: uppercase; outline: none; transition: border-color 0.3s;
+}
+.sync-input:focus { border-color: var(--accent); }
+.sync-download-result { margin-top: 1rem; font-size: 0.85rem; text-align: center; }
+.sync-status { margin-top: 1rem; font-size: 0.82rem; text-align: center; min-height: 1.2rem; }
+.sync-status.ok { color: var(--accent); }
+.sync-status.err { color: #c44040; }
+
 /* ====== ANIMATIONS ====== */
 @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 .fade-in { animation: fadeIn 0.5s ease forwards; }
@@ -266,6 +330,48 @@ footer p { font-family: 'Cormorant Garamond', serif; font-size: 0.78rem; letter-
   </div>
 
   <div class="chapter-grid fade-in" id="chapterGrid"></div>
+
+  <div class="sync-section fade-in">
+    <button class="sync-btn" onclick="openSyncModal()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+      跨裝置同步進度
+    </button>
+  </div>
+</div>
+
+<!-- Sync Modal -->
+<div class="sync-overlay" id="syncOverlay" onclick="if(event.target===this)closeSyncModal()">
+  <div class="sync-modal">
+    <button class="sync-close" onclick="closeSyncModal()">&times;</button>
+    <h3>跨裝置同步</h3>
+    <p class="sync-desc">使用同步碼，在不同瀏覽器或裝置間同步學習進度。</p>
+
+    <div class="sync-tabs">
+      <button class="sync-tab active" onclick="switchSyncTab('upload')" id="tabUpload">上傳進度</button>
+      <button class="sync-tab" onclick="switchSyncTab('download')" id="tabDownload">下載進度</button>
+    </div>
+
+    <div id="syncUploadView" class="sync-view">
+      <p class="sync-hint">產生同步碼並上傳目前進度到雲端：</p>
+      <button class="sync-action-btn" onclick="uploadProgress()">產生同步碼</button>
+      <div id="syncCodeResult" class="sync-code-result" style="display:none;">
+        <div class="sync-code-display" id="syncCodeDisplay"></div>
+        <button class="sync-copy-btn" onclick="copySyncCode()">複製</button>
+        <p class="sync-note">請記住這組同步碼，在其他裝置輸入即可還原進度。</p>
+      </div>
+    </div>
+
+    <div id="syncDownloadView" class="sync-view" style="display:none;">
+      <p class="sync-hint">輸入同步碼，從雲端下載進度：</p>
+      <div class="sync-input-row">
+        <input type="text" id="syncCodeInput" class="sync-input" placeholder="輸入 6 位同步碼" maxlength="6" autocomplete="off" spellcheck="false">
+        <button class="sync-action-btn" onclick="downloadProgress()">下載</button>
+      </div>
+      <div id="syncDownloadResult" class="sync-download-result"></div>
+    </div>
+
+    <div id="syncStatus" class="sync-status"></div>
+  </div>
 </div>
 
 <!-- CHAPTER -->
@@ -312,6 +418,9 @@ footer p { font-family: 'Cormorant Garamond', serif; font-size: 0.78rem; letter-
   </div>
   <div class="footer-desc">每一天，都值得被溫柔以待。</div>
 </footer>
+
+<!-- Supabase SDK -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
 <!-- Content JS files -->
 <script src="content/ch1.js"></script>
@@ -554,6 +663,94 @@ function showView(id) {
 }
 
 function goHome() { showView('home'); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+
+// ====================================================================
+//  SYNC (Supabase)
+// ====================================================================
+const SUPABASE_URL = 'https://kpehuukrvhblpkaxyzml.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtwZWh1dWtydmhibHBrYXh5em1sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2NTUyNzEsImV4cCI6MjA5MDIzMTI3MX0.Myr2JRfhYvPBgnShENxWej68iSqY3q_D01YvInOihys';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+function genSyncCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+function setSyncStatus(msg, ok) {
+  const el = document.getElementById('syncStatus');
+  el.textContent = msg;
+  el.className = 'sync-status ' + (ok ? 'ok' : 'err');
+  if (msg) setTimeout(() => { el.textContent = ''; el.className = 'sync-status'; }, 4000);
+}
+
+function openSyncModal() {
+  document.getElementById('syncOverlay').classList.add('open');
+  document.getElementById('syncStatus').textContent = '';
+  document.getElementById('syncCodeResult').style.display = 'none';
+  document.getElementById('syncDownloadResult').textContent = '';
+  document.getElementById('syncCodeInput').value = '';
+}
+function closeSyncModal() { document.getElementById('syncOverlay').classList.remove('open'); }
+
+function switchSyncTab(tab) {
+  document.getElementById('tabUpload').classList.toggle('active', tab === 'upload');
+  document.getElementById('tabDownload').classList.toggle('active', tab === 'download');
+  document.getElementById('syncUploadView').style.display = tab === 'upload' ? '' : 'none';
+  document.getElementById('syncDownloadView').style.display = tab === 'download' ? '' : 'none';
+  document.getElementById('syncStatus').textContent = '';
+}
+
+async function uploadProgress() {
+  const progress = loadProgress();
+  const doneCount = Object.keys(progress).filter(k => progress[k]).length;
+  if (doneCount === 0) { setSyncStatus('目前沒有學習進度可以上傳', false); return; }
+
+  const code = genSyncCode();
+  try {
+    const { error } = await sb.from('isp_progress').upsert({ sync_code: code, progress });
+    if (error) throw error;
+    document.getElementById('syncCodeDisplay').textContent = code;
+    document.getElementById('syncCodeResult').style.display = '';
+    localStorage.setItem('dailyisp_sync_code', code);
+    setSyncStatus('上傳成功！已完成 ' + doneCount + ' 個小節', true);
+  } catch (e) {
+    setSyncStatus('上傳失敗：' + (e.message || '未知錯誤'), false);
+  }
+}
+
+function copySyncCode() {
+  const code = document.getElementById('syncCodeDisplay').textContent;
+  navigator.clipboard.writeText(code).then(() => setSyncStatus('已複製同步碼', true));
+}
+
+async function downloadProgress() {
+  const code = document.getElementById('syncCodeInput').value.trim().toUpperCase();
+  if (code.length !== 6) { setSyncStatus('請輸入 6 位同步碼', false); return; }
+
+  try {
+    const { data, error } = await sb.from('isp_progress').select('progress, updated_at').eq('sync_code', code).single();
+    if (error || !data) { setSyncStatus('找不到此同步碼，請確認後再試', false); return; }
+
+    const remote = data.progress || {};
+    const local = loadProgress();
+    // Merge: keep done=true from either side
+    const merged = { ...local };
+    Object.keys(remote).forEach(k => { if (remote[k]) merged[k] = true; });
+    saveProgress(merged);
+    localStorage.setItem('dailyisp_sync_code', code);
+
+    const doneCount = Object.keys(merged).filter(k => merged[k]).length;
+    const updated = new Date(data.updated_at).toLocaleString('zh-TW');
+    document.getElementById('syncDownloadResult').innerHTML =
+      '<span style="color:var(--accent);">同步成功！</span><br>共 ' + doneCount + ' 個已完成小節<br><span style="font-size:0.75rem;color:var(--text-light);">雲端更新時間：' + updated + '</span>';
+    setSyncStatus('', true);
+    renderHome();
+  } catch (e) {
+    setSyncStatus('下載失敗：' + (e.message || '未知錯誤'), false);
+  }
+}
 
 // ====================================================================
 //  INIT
