@@ -500,31 +500,28 @@ const CH6 = {
   <line x1="300" y1="40" x2="300" y2="300" stroke="#5a5550" stroke-width="1.2"/>
   <text x="570" y="174" fill="#8a8580" font-size="11">d (input)</text>
   <text x="304" y="38" fill="#8a8580" font-size="11">C(d) (output)</text>
-  <!-- No coring (identity) -->
+  <!-- Arrow heads -->
+  <polygon points="560,170 552,166 552,174" fill="#5a5550"/>
+  <polygon points="300,40 296,48 304,48" fill="#5a5550"/>
+  <!-- No coring (identity): C(d) = d, diagonal line -->
   <line x1="120" y1="278" x2="480" y2="62" stroke="#d5cec7" stroke-width="1.5" stroke-dasharray="6,4"/>
-  <!-- Hard coring -->
-  <path d="M120,170 L230,170 L230,106 L300,170" fill="none" stroke="#c4a064" stroke-width="2.5"/>
-  <path d="M300,170 L370,234 L370,170 L480,170" fill="none" stroke="#c4a064" stroke-width="2.5"/>
-  <!-- Wait, that's wrong. Let me redo hard coring properly -->
-  <!-- Hard coring: output=0 for |d|<T, output=d for |d|>=T -->
-  <!-- Left side: d goes from negative to positive along x-axis, centered at 300 -->
-  <!-- T threshold at about x=230 (left) and x=370 (right) -->
-  <line x1="120" y1="170" x2="230" y2="170" stroke="#c4a064" stroke-width="2.5"/>
-  <line x1="370" y1="170" x2="480" y2="170" stroke="none"/>
-  <!-- at x=230 (d=-T), hard jump to the diagonal -->
-  <line x1="230" y1="170" x2="230" y2="212" stroke="#c4a064" stroke-width="2.5"/>
-  <line x1="230" y1="212" x2="120" y2="278" stroke="#c4a064" stroke-width="2.5"/>
-  <!-- right side -->
-  <line x1="300" y1="170" x2="370" y2="170" stroke="#c4a064" stroke-width="2.5"/>
-  <line x1="370" y1="170" x2="370" y2="128" stroke="#c4a064" stroke-width="2.5"/>
+  <!-- Hard Coring: C(d) = d if |d|>T, else 0 -->
+  <!-- Left: follows identity from (120,278) to (230,212), then jumps to 0 -->
+  <line x1="120" y1="278" x2="230" y2="212" stroke="#c4a064" stroke-width="2.5"/>
+  <line x1="230" y1="212" x2="230" y2="170" stroke="#c4a064" stroke-width="2.5" stroke-dasharray="3,3"/>
+  <!-- Center: flat at zero -->
+  <line x1="230" y1="170" x2="370" y2="170" stroke="#c4a064" stroke-width="2.5"/>
+  <!-- Right: jumps from 0 to identity, then follows identity -->
+  <line x1="370" y1="170" x2="370" y2="128" stroke="#c4a064" stroke-width="2.5" stroke-dasharray="3,3"/>
   <line x1="370" y1="128" x2="480" y2="62" stroke="#c4a064" stroke-width="2.5"/>
-  <!-- Soft coring -->
-  <path d="M120,265 C180,240 220,180 240,172 Q270,168 300,170 Q330,168 360,172 C380,180 420,240 480,75" fill="none" stroke="#6a8a7a" stroke-width="2.5"/>
+  <!-- Soft Coring (smooth): C(d) = d × max(0, 1−(T/|d|)²) -->
+  <!-- Flat at 0 for |d|≤T, smoothly curves toward identity for |d|>T -->
+  <path d="M120,262 C150,244 190,170 230,170 L370,170 C410,170 450,96 480,78" fill="none" stroke="#6a8a7a" stroke-width="2.5"/>
   <!-- Threshold markers -->
   <line x1="230" y1="165" x2="230" y2="175" stroke="#8a8580" stroke-width="1"/>
-  <text x="230" y="188" fill="#8a8580" font-size="10" text-anchor="middle">−T</text>
+  <text x="230" y="192" fill="#8a8580" font-size="10" text-anchor="middle">−T</text>
   <line x1="370" y1="165" x2="370" y2="175" stroke="#8a8580" stroke-width="1"/>
-  <text x="370" y="188" fill="#8a8580" font-size="10" text-anchor="middle">+T</text>
+  <text x="370" y="192" fill="#8a8580" font-size="10" text-anchor="middle">+T</text>
   <!-- Legend -->
   <line x1="140" y1="320" x2="170" y2="320" stroke="#d5cec7" stroke-width="1.5" stroke-dasharray="6,4"/>
   <text x="175" y="324" fill="#8a8580" font-size="11">No Coring (identity)</text>
