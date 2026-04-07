@@ -1242,6 +1242,1186 @@ float M_bradford[3][3] = {
         "3D LUT 可替代 CCM + Gamma + Saturation + Hue 的功能",
         "驗證 Pipeline 需使用灰卡、白卡、Macbeth 色卡和真實場景"
       ]
+    },
+    {
+      id: "ch4_11",
+      title: "CCM 硬體實現與定點運算 CCM Hardware Implementation",
+      content: `
+<h3>CCM 硬體架構概述</h3>
+<p>Color Correction Matrix（CCM）是 ISP 色彩 Pipeline 中最核心的模組之一。在硬體實現中，CCM 本質上是一個 3×3 矩陣乘法器，將 Sensor RGB 映射到標準色彩空間（如 sRGB）。看似簡單的矩陣乘法，在硬體設計中卻需要考慮定點數格式、溢位處理、Pipeline 時序等諸多細節。</p>
+
+<div class="formula">
+[R']   [C00 C01 C02] [R]   [Offset_R]
+[G'] = [C10 C11 C12] [G] + [Offset_G]
+[B']   [C20 C21 C22] [B]   [Offset_B]
+</div>
+
+<p>每個輸出通道需要 3 次乘法和 2 次加法（再加 Offset），因此 3 個通道共需 9 次乘法、9 次加法。在高速 ISP 中，這必須在 1 個 clock cycle 內完成，或使用 Pipeline 分段處理。</p>
+
+<div class="diagram"><svg viewBox="0 0 600 340" xmlns="http://www.w3.org/2000/svg">
+  <rect fill="#f5f0eb" width="600" height="340" rx="8"/>
+  <text x="300" y="25" text-anchor="middle" font-size="13" fill="#5a5550" font-weight="500">CCM 硬體 Pipeline 架構</text>
+  <!-- Input registers -->
+  <rect x="20" y="50" width="70" height="30" rx="4" fill="rgba(196,160,100,0.15)" stroke="#c4a064" stroke-width="1.5"/>
+  <text x="55" y="69" text-anchor="middle" font-size="10" fill="#c4a064">R_in</text>
+  <rect x="20" y="90" width="70" height="30" rx="4" fill="rgba(106,138,122,0.15)" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="55" y="109" text-anchor="middle" font-size="10" fill="#6a8a7a">G_in</text>
+  <rect x="20" y="130" width="70" height="30" rx="4" fill="rgba(74,122,181,0.15)" stroke="#4a7ab5" stroke-width="1.5"/>
+  <text x="55" y="149" text-anchor="middle" font-size="10" fill="#4a7ab5">B_in</text>
+  <!-- Multipliers stage -->
+  <rect x="130" y="40" width="120" height="140" rx="6" fill="rgba(213,206,199,0.2)" stroke="#d5cec7" stroke-width="1"/>
+  <text x="190" y="58" text-anchor="middle" font-size="9" fill="#5a5550" font-weight="500">9 Multipliers</text>
+  <text x="190" y="75" text-anchor="middle" font-size="8" fill="#8a8580">C00×R  C01×G  C02×B</text>
+  <text x="190" y="90" text-anchor="middle" font-size="8" fill="#8a8580">C10×R  C11×G  C12×B</text>
+  <text x="190" y="105" text-anchor="middle" font-size="8" fill="#8a8580">C20×R  C21×G  C22×B</text>
+  <rect x="145" y="115" width="90" height="20" rx="3" fill="rgba(196,160,100,0.1)" stroke="#c4a064" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="190" y="129" text-anchor="middle" font-size="7" fill="#c4a064">Pipeline Reg Stage 1</text>
+  <!-- Adder stage -->
+  <line x1="250" y1="100" x2="280" y2="100" stroke="#6a8a7a" stroke-width="1.2"/>
+  <rect x="280" y="50" width="100" height="120" rx="6" fill="rgba(106,138,122,0.1)" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="330" y="70" text-anchor="middle" font-size="9" fill="#5a5550" font-weight="500">Adder Tree</text>
+  <text x="330" y="88" text-anchor="middle" font-size="8" fill="#8a8580">R' = sum + Offset_R</text>
+  <text x="330" y="103" text-anchor="middle" font-size="8" fill="#8a8580">G' = sum + Offset_G</text>
+  <text x="330" y="118" text-anchor="middle" font-size="8" fill="#8a8580">B' = sum + Offset_B</text>
+  <rect x="290" y="130" width="80" height="20" rx="3" fill="rgba(196,160,100,0.1)" stroke="#c4a064" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="330" y="144" text-anchor="middle" font-size="7" fill="#c4a064">Pipeline Reg Stage 2</text>
+  <!-- Clamp stage -->
+  <line x1="380" y1="100" x2="410" y2="100" stroke="#6a8a7a" stroke-width="1.2"/>
+  <rect x="410" y="60" width="80" height="100" rx="6" fill="rgba(196,64,64,0.08)" stroke="#c44040" stroke-width="1"/>
+  <text x="450" y="80" text-anchor="middle" font-size="9" fill="#c44040" font-weight="500">Clamp</text>
+  <text x="450" y="98" text-anchor="middle" font-size="8" fill="#8a8580">Overflow →Max</text>
+  <text x="450" y="113" text-anchor="middle" font-size="8" fill="#8a8580">Underflow →0</text>
+  <text x="450" y="128" text-anchor="middle" font-size="8" fill="#8a8580">Round & Shift</text>
+  <!-- Output -->
+  <line x1="490" y1="100" x2="520" y2="100" stroke="#6a8a7a" stroke-width="1.2"/>
+  <rect x="520" y="70" width="60" height="60" rx="4" fill="rgba(106,138,122,0.15)" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="550" y="98" text-anchor="middle" font-size="9" fill="#6a8a7a" font-weight="500">R'G'B'</text>
+  <text x="550" y="112" text-anchor="middle" font-size="7" fill="#8a8580">Output</text>
+  <!-- Bit width annotation -->
+  <text x="300" y="210" text-anchor="middle" font-size="11" fill="#5a5550" font-weight="500">定點數位寬設計範例</text>
+  <rect x="50" y="225" width="500" height="100" rx="6" fill="rgba(213,206,199,0.15)" stroke="#d5cec7" stroke-width="1"/>
+  <text x="70" y="248" font-size="9" fill="#5a5550">Input:  12-bit unsigned (0~4095)</text>
+  <text x="70" y="268" font-size="9" fill="#5a5550">Coeff:  S4.8 signed fixed-point (1 sign + 4 integer + 8 fraction = 13 bits)</text>
+  <text x="70" y="288" font-size="9" fill="#5a5550">Mult:   12 + 13 = 25 bits (signed product)</text>
+  <text x="70" y="308" font-size="9" fill="#5a5550">Sum:    25 + 2 = 27 bits (3-input add, +2 guard bits) → Round → Clamp → 12-bit output</text>
+</svg><div class="caption">圖 4-11：CCM 硬體 Pipeline 架構與位寬設計</div></div>
+
+<h3>定點數格式選擇</h3>
+<p>CCM 係數通常包含負值（Off-diagonal 元素可能為 -0.5 ~ -1.5），因此必須使用有號定點數。常見格式：</p>
+
+<div class="table-container"><table>
+<tr><th>格式</th><th>位寬</th><th>範圍</th><th>精度</th><th>適用場景</th></tr>
+<tr><td>S3.8</td><td>12 bits</td><td>-8.0 ~ +7.996</td><td>1/256</td><td>低精度、面積受限</td></tr>
+<tr><td>S4.8</td><td>13 bits</td><td>-16.0 ~ +15.996</td><td>1/256</td><td>常見設計、平衡選擇</td></tr>
+<tr><td>S3.12</td><td>16 bits</td><td>-8.0 ~ +7.9998</td><td>1/4096</td><td>高精度需求</td></tr>
+<tr><td>S4.10</td><td>15 bits</td><td>-16.0 ~ +15.999</td><td>1/1024</td><td>高階 ISP</td></tr>
+</table></div>
+
+<p>係數精度的選擇直接影響色彩準確度。一般而言，8-bit 小數精度的量化誤差約為 ΔE ≈ 0.3~0.5，對大多數應用已經足夠。但在醫療影像或廣色域（Wide Color Gamut）應用中，可能需要 10-12 bit 小數精度。</p>
+
+<h3>溢位處理策略</h3>
+<p>CCM 矩陣乘法後的結果可能超出有效範圍。硬體中的處理策略包括：</p>
+<ul>
+<li><strong>Hard Clamp</strong>：直接截斷到 [0, Max]，簡單但可能造成色彩失真（飽和色區域）</li>
+<li><strong>Soft Clamp</strong>：在接近邊界時使用壓縮曲線，保留更多色彩細節</li>
+<li><strong>Guard Bits</strong>：在中間運算中保留額外位元，只在最終輸出時截斷</li>
+<li><strong>Rounding Mode</strong>：Round-to-nearest（四捨五入）vs Truncation（截斷），前者精度更好但硬體稍複雜</li>
+</ul>
+
+<div class="info-box key">
+<div class="box-title">核心概念</div>
+CCM 硬體設計的三大挑戰：(1) 定點係數精度需足以維持 ΔE < 1.0 的色彩準確度。(2) 乘法器面積佔 ISP 面積的很大比例，需考慮資源共享或 Multiplier-less 設計。(3) Pipeline 延遲需控制在可接受範圍內，特別是在 4K/8K 高畫素率場景。
+</div>
+
+<h3>面積優化技巧</h3>
+<p>在低成本 ISP 中，9 個乘法器的面積可能無法接受。常見的優化技巧：</p>
+<ul>
+<li><strong>時分多工（TDM）</strong>：使用 3 個乘法器，3 個 clock cycle 完成一組 RGB，適用於低像素率場景</li>
+<li><strong>CSD Coding</strong>：將係數編碼為 Canonical Signed Digit，用移位和加法替代乘法</li>
+<li><strong>Row Sum = 1 約束</strong>：利用 CCM 行和為 1 的特性，將 3 次乘法簡化為 2 次乘法 + 1 次減法</li>
+<li><strong>對稱性利用</strong>：某些 CCM 結構具有近似對稱性，可共享部分乘法器</li>
+</ul>
+
+<div class="info-box example">
+<div class="box-title">設計範例</div>
+以 12-bit input、S4.8 係數為例的 Verilog 風格描述：<br>
+<code>wire signed [24:0] prod_r0 = $signed({1'b0, R_in}) * $signed(C00);</code><br>
+<code>wire signed [24:0] prod_r1 = $signed({1'b0, G_in}) * $signed(C01);</code><br>
+<code>wire signed [24:0] prod_r2 = $signed({1'b0, B_in}) * $signed(C02);</code><br>
+<code>wire signed [26:0] sum_r = prod_r0 + prod_r1 + prod_r2 + $signed(Offset_R);</code><br>
+<code>wire [11:0] R_out = (sum_r[26]) ? 12'd0 : (sum_r[25:8] > 4095) ? 12'd4095 : sum_r[19:8];</code>
+</div>
+`,
+      keyPoints: [
+        "CCM 硬體核心是 3×3 矩陣乘法，需 9 個乘法器和加法器樹",
+        "定點格式常用 S4.8 或 S3.12，小數精度影響色彩 ΔE",
+        "溢位處理需結合 Guard Bits、Clamp 和 Rounding",
+        "面積優化可用時分多工、CSD Coding 或行和約束",
+        "Pipeline Register 設計影響時序和延遲的平衡"
+      ]
+    },
+    {
+      id: "ch4_12",
+      title: "AWB 演算法硬體架構 AWB Hardware Architecture",
+      content: `
+<h3>AWB 系統概述</h3>
+<p>Auto White Balance（AWB）是 ISP 中最關鍵的即時控制演算法之一。AWB 的目標是估計場景的光源色溫，並計算對應的 WB Gain（R_gain, G_gain, B_gain），使白色物體在影像中呈現為中性灰/白。硬體 AWB 系統通常分為兩個部分：<strong>Statistics Engine</strong>（硬體統計引擎）和 <strong>AWB Algorithm</strong>（韌體/軟體演算法）。</p>
+
+<div class="diagram"><svg viewBox="0 0 600 300" xmlns="http://www.w3.org/2000/svg">
+  <rect fill="#f5f0eb" width="600" height="300" rx="8"/>
+  <text x="300" y="25" text-anchor="middle" font-size="13" fill="#5a5550" font-weight="500">AWB 硬體/軟體分工架構</text>
+  <!-- HW Statistics Engine -->
+  <rect x="30" y="50" width="250" height="200" rx="8" fill="rgba(106,138,122,0.06)" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="155" y="72" text-anchor="middle" font-size="11" fill="#6a8a7a" font-weight="500">Hardware Statistics Engine</text>
+  <rect x="50" y="85" width="90" height="35" rx="4" fill="rgba(106,138,122,0.15)" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="95" y="107" text-anchor="middle" font-size="8" fill="#5a5550">ROI Grid</text>
+  <rect x="160" y="85" width="100" height="35" rx="4" fill="rgba(106,138,122,0.15)" stroke="#6a8a7a" stroke-width="1"/>
+  <text x="210" y="100" text-anchor="middle" font-size="8" fill="#5a5550">Pixel Filter</text>
+  <text x="210" y="112" text-anchor="middle" font-size="7" fill="#8a8580">(threshold)</text>
+  <rect x="50" y="135" width="210" height="35" rx="4" fill="rgba(196,160,100,0.12)" stroke="#c4a064" stroke-width="1"/>
+  <text x="155" y="150" text-anchor="middle" font-size="8" fill="#5a5550">Sum(R), Sum(G), Sum(B), Count per block</text>
+  <text x="155" y="162" text-anchor="middle" font-size="7" fill="#8a8580">Per-block accumulator</text>
+  <rect x="50" y="185" width="210" height="35" rx="4" fill="rgba(196,160,100,0.12)" stroke="#c4a064" stroke-width="1"/>
+  <text x="155" y="200" text-anchor="middle" font-size="8" fill="#5a5550">R/G, B/G ratio histogram</text>
+  <text x="155" y="212" text-anchor="middle" font-size="7" fill="#8a8580">Optional: color ratio distribution</text>
+  <!-- Arrow -->
+  <line x1="280" y1="150" x2="320" y2="150" stroke="#c4a064" stroke-width="1.5" marker-end="url(#arw11)"/>
+  <text x="300" y="143" text-anchor="middle" font-size="7" fill="#c4a064">IRQ</text>
+  <!-- SW Algorithm -->
+  <rect x="320" y="50" width="250" height="200" rx="8" fill="rgba(74,122,181,0.06)" stroke="#4a7ab5" stroke-width="1.5"/>
+  <text x="445" y="72" text-anchor="middle" font-size="11" fill="#4a7ab5" font-weight="500">Firmware AWB Algorithm</text>
+  <rect x="340" y="85" width="210" height="30" rx="4" fill="rgba(74,122,181,0.12)" stroke="#4a7ab5" stroke-width="1"/>
+  <text x="445" y="105" text-anchor="middle" font-size="8" fill="#5a5550">White Point Detection (Gray World / White Patch)</text>
+  <rect x="340" y="125" width="210" height="30" rx="4" fill="rgba(74,122,181,0.12)" stroke="#4a7ab5" stroke-width="1"/>
+  <text x="445" y="145" text-anchor="middle" font-size="8" fill="#5a5550">Color Temperature Estimation</text>
+  <rect x="340" y="165" width="210" height="30" rx="4" fill="rgba(74,122,181,0.12)" stroke="#4a7ab5" stroke-width="1"/>
+  <text x="445" y="185" text-anchor="middle" font-size="8" fill="#5a5550">Gain Calculation & Convergence</text>
+  <rect x="340" y="205" width="210" height="30" rx="4" fill="rgba(74,122,181,0.12)" stroke="#4a7ab5" stroke-width="1"/>
+  <text x="445" y="225" text-anchor="middle" font-size="8" fill="#5a5550">Output: R_gain, B_gain → HW registers</text>
+  <defs><marker id="arw11" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#c4a064"/></marker></defs>
+</svg><div class="caption">圖 4-12：AWB 硬體統計引擎與軟體演算法分工</div></div>
+
+<h3>Statistics Engine 設計</h3>
+<p>AWB 統計引擎的核心功能是在每一幀中收集色彩分佈資訊，提供給韌體演算法使用。典型的統計資料包括：</p>
+
+<div class="table-container"><table>
+<tr><th>統計量</th><th>說明</th><th>典型精度</th><th>SRAM 需求</th></tr>
+<tr><td>Per-block Sum</td><td>每個 Block 的 R/G/B 累加值</td><td>32-bit per channel</td><td>32×32 grid × 4 × 32b = 16 KB</td></tr>
+<tr><td>Per-block Count</td><td>通過 Filter 的像素數量</td><td>16-bit</td><td>32×32 × 16b = 2 KB</td></tr>
+<tr><td>R/G Histogram</td><td>R/G 比值的分佈</td><td>256 bins × 20-bit</td><td>~640 B</td></tr>
+<tr><td>B/G Histogram</td><td>B/G 比值的分佈</td><td>256 bins × 20-bit</td><td>~640 B</td></tr>
+</table></div>
+
+<h3>Gray World 演算法</h3>
+<p>最基本的 AWB 演算法。假設場景的平均色彩應為灰色（achromatic），因此 R、G、B 三通道的平均值應相等：</p>
+<div class="formula">R_gain = G_avg / R_avg, &nbsp; B_gain = G_avg / B_avg</div>
+<p>優點是計算簡單、硬體開銷小。缺點是在大面積單色場景中（如藍天、綠草地）會產生嚴重的色偏。</p>
+
+<h3>White Patch 演算法</h3>
+<p>假設場景中最亮的像素應為白色。通過找到 R、G、B 各自的最大值來估計光源色彩：</p>
+<div class="formula">R_gain = Max(G) / Max(R), &nbsp; B_gain = Max(G) / Max(B)</div>
+<p>對高光過曝的場景敏感，通常需要先排除飽和像素。</p>
+
+<h3>ROI-based 白點偵測</h3>
+<p>現代 ISP 通常結合 ROI（Region of Interest）過濾器，只統計「可能是白色/灰色」的像素。過濾條件包括：</p>
+<ul>
+<li><strong>亮度閾值</strong>：排除過暗（noise 干擾）和過亮（過曝）的像素</li>
+<li><strong>色度閾值</strong>：只選擇接近灰軸的像素（|R/G - 1| < threshold 且 |B/G - 1| < threshold）</li>
+<li><strong>綠通道範圍</strong>：確保像素有足夠的信噪比</li>
+<li><strong>色溫範圍框</strong>：在 R/G vs B/G 空間中定義合法的色溫區域，排除區域外像素</li>
+</ul>
+
+<div class="info-box key">
+<div class="box-title">核心概念</div>
+AWB 統計引擎的設計品質直接影響 AWB 演算法的表現。一個好的統計引擎應提供：(1) 足夠精細的空間分區（至少 32×32 blocks）。(2) 靈活的像素過濾條件。(3) 色彩比值的分佈直方圖。這些資料讓韌體能實現更複雜的白點檢測策略。
+</div>
+
+<h3>Convergence Control 收斂控制</h3>
+<p>AWB Gain 不能在幀與幀之間劇烈變化，否則會造成閃爍（flickering）。收斂策略包括：</p>
+<ul>
+<li><strong>IIR 低通濾波</strong>：<code>Gain[n] = α × Gain_new + (1-α) × Gain[n-1]</code>，α 通常為 0.1~0.3</li>
+<li><strong>Step Size 限制</strong>：每幀 Gain 變化量不超過某個上限（如 ±0.02）</li>
+<li><strong>Dead Zone</strong>：當誤差小於閾值時不再更新，避免在收斂點附近震盪</li>
+<li><strong>場景變化檢測</strong>：當偵測到場景劇變（如平移拍攝）時，加快收斂速度</li>
+</ul>
+
+<div class="info-box warn">
+<div class="box-title">注意事項</div>
+AWB 統計引擎的取樣位置很重要。統計應在 BLC 和 LSC 校正之後、WB Gain 之前進行，這樣統計到的是原始的 Sensor 色彩比值，不會被上一幀的 WB Gain 影響（稱為 pre-gain statistics）。某些 ISP 提供 post-gain statistics，但需要韌體將 Gain 效果扣除。
+</div>
+`,
+      keyPoints: [
+        "AWB 系統分為硬體統計引擎和韌體演算法兩部分",
+        "統計引擎收集 Per-block 的 RGB Sum/Count 和色彩比值直方圖",
+        "Gray World 假設場景平均色為灰色，簡單但對單色場景失效",
+        "ROI-based 白點偵測透過亮度、色度、色溫範圍過濾像素",
+        "收斂控制使用 IIR 濾波和 Step Size 限制避免閃爍"
+      ]
+    },
+    {
+      id: "ch4_13",
+      title: "多光源 AWB 與場景偵測 Multi-illuminant AWB",
+      content: `
+<h3>多光源場景的挑戰</h3>
+<p>真實世界的拍攝場景經常包含多種光源：室內日光燈搭配窗外自然光、夜間人造光混合車燈等。傳統 AWB 演算法假設場景只有一個主光源（Single Illuminant Assumption），在多光源場景中會選擇一個「折衷」的色溫，導致畫面部分區域偏色。</p>
+
+<h3>色溫空間中的光源分佈</h3>
+<p>在 R/G vs B/G 的二維空間中，不同色溫的光源分佈在一條曲線（Planckian Locus）附近。多光源場景的統計資料會呈現多個聚類（clusters），每個聚類對應一種光源：</p>
+
+<div class="diagram"><svg viewBox="0 0 600 350" xmlns="http://www.w3.org/2000/svg">
+  <rect fill="#f5f0eb" width="600" height="350" rx="8"/>
+  <text x="300" y="25" text-anchor="middle" font-size="13" fill="#5a5550" font-weight="500">R/G vs B/G 空間中的多光源分佈</text>
+  <!-- Axes -->
+  <line x1="80" y1="300" x2="550" y2="300" stroke="#8a8580" stroke-width="1"/>
+  <line x1="80" y1="300" x2="80" y2="50" stroke="#8a8580" stroke-width="1"/>
+  <text x="315" y="330" text-anchor="middle" font-size="10" fill="#5a5550">R/G ratio</text>
+  <text x="40" y="175" text-anchor="middle" font-size="10" fill="#5a5550" transform="rotate(-90,40,175)">B/G ratio</text>
+  <!-- Planckian locus curve -->
+  <path d="M130,80 Q200,100 280,160 Q350,210 450,270" fill="none" stroke="#c4a064" stroke-width="2" stroke-dasharray="6,3"/>
+  <text x="470" y="265" font-size="8" fill="#c4a064">Planckian Locus</text>
+  <!-- Color temperature labels -->
+  <text x="120" y="72" font-size="8" fill="#4a7ab5">10000K</text>
+  <circle cx="130" cy="80" r="3" fill="#4a7ab5"/>
+  <text x="195" y="95" font-size="8" fill="#4a7ab5">7500K</text>
+  <text x="270" y="150" font-size="8" fill="#6a8a7a">5500K (D55)</text>
+  <circle cx="280" cy="160" r="3" fill="#6a8a7a"/>
+  <text x="345" y="200" font-size="8" fill="#c4a064">4000K (TL84)</text>
+  <circle cx="350" cy="210" r="3" fill="#c4a064"/>
+  <text x="440" y="255" font-size="8" fill="#c44040">2800K (A)</text>
+  <circle cx="450" cy="270" r="3" fill="#c44040"/>
+  <!-- Cluster 1: Daylight -->
+  <ellipse cx="290" cy="165" rx="40" ry="25" fill="rgba(106,138,122,0.15)" stroke="#6a8a7a" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="290" y="200" text-anchor="middle" font-size="9" fill="#6a8a7a" font-weight="500">Cluster A: 窗外日光</text>
+  <!-- Cluster 2: Indoor -->
+  <ellipse cx="380" cy="230" rx="35" ry="20" fill="rgba(196,160,100,0.15)" stroke="#c4a064" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="380" y="258" text-anchor="middle" font-size="9" fill="#c4a064" font-weight="500">Cluster B: 室內燈</text>
+  <!-- Mixed zone -->
+  <ellipse cx="335" cy="195" rx="20" ry="15" fill="rgba(196,64,64,0.1)" stroke="#c44040" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="335" y="185" text-anchor="middle" font-size="7" fill="#c44040">混合區域</text>
+</svg><div class="caption">圖 4-13：R/G vs B/G 空間中多光源場景的聚類分佈</div></div>
+
+<h3>多光源 AWB 策略</h3>
+<p>處理多光源場景的主要方法：</p>
+
+<h4>1. Weighted Gray World</h4>
+<p>根據每個 Block 的色溫估計值，給予不同的權重。接近 Planckian Locus 的 Block 權重較高，偏離較遠的（如大面積綠草地）權重較低。</p>
+
+<h4>2. 最大聚類法（Dominant Illuminant）</h4>
+<p>在色溫空間中尋找最大的像素聚類，以其中心作為主光源的估計。適合有明確主光源的場景。</p>
+
+<h4>3. 多區域獨立 AWB</h4>
+<p>將畫面分為多個區域，每個區域獨立估計色溫，然後根據區域特徵（如人臉位置、中心權重）融合。這種方法計算量較大，通常只在高階 ISP 中實現。</p>
+
+<h3>場景偵測 Scene Detection</h3>
+<p>許多 AWB 失敗案例可以通過場景偵測來避免。常見的場景類型和對應策略：</p>
+
+<div class="table-container"><table>
+<tr><th>場景類型</th><th>偵測方法</th><th>AWB 策略</th></tr>
+<tr><td>藍天場景</td><td>大面積高亮度 + 高 B/G ratio</td><td>降低藍色區域的 AWB 權重</td></tr>
+<tr><td>綠色植物</td><td>大面積高 G/R 且高 G/B ratio</td><td>排除綠色區域的統計</td></tr>
+<tr><td>日落/日出</td><td>低色溫 + 天空區域橙色分佈</td><td>保留暖色調、限制 WB 矯正範圍</td></tr>
+<tr><td>夜間人造光</td><td>低亮度 + 高對比 + 點狀高亮</td><td>使用白點偵測、忽略暗區統計</td></tr>
+<tr><td>膚色主導</td><td>人臉偵測 + 膚色比例高</td><td>限制色溫在膚色友好範圍內</td></tr>
+</table></div>
+
+<h3>色溫估計硬體</h3>
+<p>快速色溫估計可以在硬體中實現，用於場景偵測的輔助判斷。典型方法是在 R/G vs B/G 空間中，計算統計資料重心到 Planckian Locus 的投影點，然後查表得到對應色溫。硬體實現時，Planckian Locus 可以用分段線性逼近（Piecewise Linear Approximation），用 8~16 段即可達到足夠精度。</p>
+
+<div class="info-box key">
+<div class="box-title">核心概念</div>
+多光源 AWB 的核心難題在於「一組全域 WB Gain 無法同時校正多種光源」。理想的解決方案是局部色彩校正（Local Color Correction），但這需要 per-pixel 或 per-block 的 WB Gain Map，硬體成本很高。實際工程中的折衷方案是：選擇主光源進行全域校正，對次要光源區域容忍一定程度的殘餘色偏。
+</div>
+
+<div class="info-box tip">
+<div class="box-title">實務提示</div>
+調試多光源場景時，建議使用 AWB 統計引擎的 per-block 資料，在 R/G vs B/G 空間中繪製散點圖。這樣可以直觀地看到光源分佈，判斷演算法是否選擇了合理的白點。許多 ISP vendor 的 tuning tool 都提供這樣的視覺化功能。
+</div>
+`,
+      keyPoints: [
+        "多光源場景中，單一 WB Gain 無法同時校正所有光源",
+        "R/G vs B/G 空間中光源分佈沿 Planckian Locus 排列",
+        "場景偵測（藍天、綠草、日落、夜景）可避免常見 AWB 失敗",
+        "色溫估計硬體可用 Planckian Locus 分段線性逼近實現",
+        "工程折衷：全域校正主光源，容忍次要光源的殘餘色偏"
+      ]
+    },
+    {
+      id: "ch4_14",
+      title: "Color Space Conversion 硬體 CSC Hardware",
+      content: `
+<h3>色彩空間轉換的需求</h3>
+<p>ISP 內部主要在 RGB 域處理色彩，但輸出時經常需要轉換為 YUV/YCbCr 格式，因為影像壓縮（H.264/H.265）和顯示系統通常使用亮度-色度分離的格式。Color Space Conversion（CSC）模組負責 RGB ↔ YCbCr 的即時轉換，必須嚴格遵循 ITU-R 標準。</p>
+
+<h3>BT.601 / BT.709 / BT.2020 轉換矩陣</h3>
+<p>三個主要標準的轉換係數不同，對應不同的色彩空間和解析度：</p>
+
+<div class="table-container"><table>
+<tr><th>標準</th><th>適用範圍</th><th>Y 係數 (Kr, Kg, Kb)</th></tr>
+<tr><td>BT.601</td><td>SD (480i/576i)</td><td>0.299, 0.587, 0.114</td></tr>
+<tr><td>BT.709</td><td>HD (720p/1080p)</td><td>0.2126, 0.7152, 0.0722</td></tr>
+<tr><td>BT.2020</td><td>UHD (4K/8K, HDR)</td><td>0.2627, 0.6780, 0.0593</td></tr>
+</table></div>
+
+<p>完整的轉換公式（Full Range）：</p>
+<div class="formula">
+Y  = Kr×R + Kg×G + Kb×B<br>
+Cb = (B - Y) / (2×(1-Kb)) + 128<br>
+Cr = (R - Y) / (2×(1-Kr)) + 128
+</div>
+
+<p>展開為矩陣形式（以 BT.709 為例）：</p>
+<div class="formula">
+[Y ]   [ 0.2126   0.7152   0.0722] [R]   [  0]<br>
+[Cb] = [-0.1146  -0.3854   0.5000] [G] + [128]<br>
+[Cr]   [ 0.5000  -0.4542  -0.0458] [B]   [128]
+</div>
+
+<h3>Full Range vs Limited Range</h3>
+<p>這是一個常見的混淆來源：</p>
+<ul>
+<li><strong>Full Range</strong>（JPEG/PC Range）：Y ∈ [0, 255], Cb/Cr ∈ [0, 255]（8-bit）</li>
+<li><strong>Limited Range</strong>（TV/Studio Range）：Y ∈ [16, 235], Cb/Cr ∈ [16, 240]（8-bit）</li>
+</ul>
+<p>Limited Range 的轉換需要額外的 Scale 和 Offset。在硬體中，通常用不同的係數集來支援兩種 Range，而非在 Full Range 結果上再做縮放。</p>
+
+<div class="diagram"><svg viewBox="0 0 600 220" xmlns="http://www.w3.org/2000/svg">
+  <rect fill="#f5f0eb" width="600" height="220" rx="8"/>
+  <text x="300" y="25" text-anchor="middle" font-size="13" fill="#5a5550" font-weight="500">CSC 硬體 Pipeline</text>
+  <!-- Input -->
+  <rect x="20" y="80" width="70" height="60" rx="4" fill="rgba(106,138,122,0.15)" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="55" y="105" text-anchor="middle" font-size="9" fill="#6a8a7a" font-weight="500">RGB</text>
+  <text x="55" y="120" text-anchor="middle" font-size="7" fill="#8a8580">10/12-bit</text>
+  <!-- Coeff MUX -->
+  <line x1="90" y1="110" x2="120" y2="110" stroke="#6a8a7a" stroke-width="1.2"/>
+  <rect x="120" y="60" width="100" height="100" rx="6" fill="rgba(196,160,100,0.1)" stroke="#c4a064" stroke-width="1"/>
+  <text x="170" y="85" text-anchor="middle" font-size="9" fill="#c4a064" font-weight="500">Coeff MUX</text>
+  <text x="170" y="102" text-anchor="middle" font-size="7" fill="#8a8580">BT.601</text>
+  <text x="170" y="114" text-anchor="middle" font-size="7" fill="#8a8580">BT.709</text>
+  <text x="170" y="126" text-anchor="middle" font-size="7" fill="#8a8580">BT.2020</text>
+  <text x="170" y="140" text-anchor="middle" font-size="7" fill="#8a8580">Custom</text>
+  <!-- Matrix Multiply -->
+  <line x1="220" y1="110" x2="250" y2="110" stroke="#6a8a7a" stroke-width="1.2"/>
+  <rect x="250" y="70" width="120" height="80" rx="6" fill="rgba(106,138,122,0.12)" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="310" y="100" text-anchor="middle" font-size="9" fill="#6a8a7a" font-weight="500">3×3 Matrix</text>
+  <text x="310" y="115" text-anchor="middle" font-size="8" fill="#8a8580">Multiply + Add</text>
+  <text x="310" y="130" text-anchor="middle" font-size="7" fill="#8a8580">+ Offset</text>
+  <!-- Clamp -->
+  <line x1="370" y1="110" x2="400" y2="110" stroke="#6a8a7a" stroke-width="1.2"/>
+  <rect x="400" y="80" width="80" height="60" rx="6" fill="rgba(196,64,64,0.08)" stroke="#c44040" stroke-width="1"/>
+  <text x="440" y="105" text-anchor="middle" font-size="9" fill="#c44040" font-weight="500">Clamp</text>
+  <text x="440" y="120" text-anchor="middle" font-size="7" fill="#8a8580">Range Check</text>
+  <!-- Output -->
+  <line x1="480" y1="110" x2="510" y2="110" stroke="#6a8a7a" stroke-width="1.2"/>
+  <rect x="510" y="80" width="70" height="60" rx="4" fill="rgba(74,122,181,0.15)" stroke="#4a7ab5" stroke-width="1.5"/>
+  <text x="545" y="105" text-anchor="middle" font-size="9" fill="#4a7ab5" font-weight="500">YCbCr</text>
+  <text x="545" y="120" text-anchor="middle" font-size="7" fill="#8a8580">8/10-bit</text>
+  <!-- Note -->
+  <text x="300" y="195" text-anchor="middle" font-size="9" fill="#5a5550">同一硬體可透過切換係數支援多種標準，也可支援逆轉換（YCbCr→RGB）</text>
+</svg><div class="caption">圖 4-14：CSC 硬體架構——支援多標準切換</div></div>
+
+<h3>定點係數實現</h3>
+<p>以 BT.709 的 Y 通道為例，浮點係數 0.2126 需轉換為定點數。若使用 10-bit 小數精度：</p>
+<div class="formula">0.2126 × 1024 = 217.7 ≈ 218 → 實際係數 = 218/1024 = 0.21289</div>
+<p>量化誤差 = |0.2126 - 0.21289| = 0.00029，對 8-bit 輸出影響不到 0.1 LSB。但對 12-bit HDR 輸出，可能需要 14-bit 小數精度。</p>
+
+<h3>硬體共享策略</h3>
+<p>CSC 模組的 3×3 矩陣乘法器可以與 CCM 模組共用。在 ISP Pipeline 中，CCM 和 CSC 不會同時作用在同一個像素上（Pipeline 的不同階段），因此可以時分多工共享乘法器，節省面積。</p>
+
+<div class="info-box key">
+<div class="box-title">核心概念</div>
+CSC 實現中最常見的 Bug 是 Full Range / Limited Range 混淆。如果 ISP 輸出 Full Range YCbCr，但 Display 端設定為 Limited Range，影像會出現「洗白」（黑不黑、白不白）的現象。反之則影像對比過高、暗部和亮部被截斷。務必確保整條影像鏈路的 Range 設定一致。
+</div>
+
+<div class="info-box tip">
+<div class="box-title">實務提示</div>
+調試 CSC 的最佳工具是灰階色卡（Gray Ramp）。轉換後的灰色像素應滿足 Cb = Cr = 128（8-bit Full Range），任何偏離都表示轉換係數或 Offset 有誤。此外，可以使用 Color Bar 測試圖案驗證各色塊的 YCbCr 值是否與標準一致。
+</div>
+`,
+      keyPoints: [
+        "CSC 負責 RGB ↔ YCbCr 轉換，需嚴格遵循 BT.601/709/2020 標準",
+        "Full Range 和 Limited Range 的混淆是最常見的 Bug 來源",
+        "定點係數精度需配合輸出位寬，8-bit 輸出用 10-bit 小數即可",
+        "CSC 與 CCM 的乘法器可以時分多工共享以節省面積",
+        "灰階色卡是驗證 CSC 正確性的最佳工具"
+      ]
+    },
+    {
+      id: "ch4_15",
+      title: "色彩飽和度硬體調整 Saturation Adjustment Hardware",
+      content: `
+<h3>飽和度調整的基本原理</h3>
+<p>色彩飽和度（Saturation）描述顏色的鮮豔程度。在 ISP 中，飽和度調整是美化影像最直觀的手段之一。硬體實現的飽和度調整通常在色度通道（Chrominance）上施加增益，同時保持亮度通道（Luminance）不變。</p>
+
+<h3>YCbCr 域飽和度調整</h3>
+<p>最簡單的方法是在 YCbCr 域中，直接對 Cb 和 Cr 通道乘以飽和度因子 S：</p>
+<div class="formula">
+Cb' = (Cb - 128) × S + 128<br>
+Cr' = (Cr - 128) × S + 128<br>
+Y' = Y （不變）
+</div>
+<p>S > 1 增加飽和度，S < 1 降低飽和度，S = 0 為灰階影像。硬體上只需 2 個乘法器和加法器。</p>
+
+<h3>RGB 域飽和度矩陣</h3>
+<p>在 RGB 域中，飽和度調整可以用一個 3×3 矩陣實現，這個矩陣可以與 CCM 合併：</p>
+<div class="formula">
+設 Kr=0.2126, Kg=0.7152, Kb=0.0722 (BT.709 亮度係數)<br>
+S_matrix = (1-S)×[Kr Kr Kr; Kg Kg Kg; Kb Kb Kb] + S×I<br>
+其中 I 為 3×3 單位矩陣，S 為飽和度因子
+</div>
+<p>這個矩陣的優點是不需要先轉換到 YCbCr 域，可以直接在 RGB Pipeline 中實現，並且可以與 CCM 矩陣相乘合併為一個矩陣。</p>
+
+<h3>Hue-Preserving Saturation（保色相飽和度）</h3>
+<p>簡單的飽和度增加可能造成色相偏移（Hue Shift），特別是在高飽和度區域。保色相飽和度調整需要在極坐標（Polar Coordinate）空間中操作：</p>
+<ul>
+<li>將 Cb/Cr 轉換為極坐標：<code>C = sqrt(Cb² + Cr²)</code>, <code>H = atan2(Cr, Cb)</code></li>
+<li>僅調整幅度 C，保持角度 H 不變：<code>C' = C × S</code></li>
+<li>轉回直角坐標：<code>Cb' = C' × cos(H)</code>, <code>Cr' = C' × sin(H)</code></li>
+</ul>
+<p>硬體上 <code>sqrt</code> 和 <code>atan2</code> 的實現成本較高，通常使用 CORDIC 演算法或查表法（LUT）。</p>
+
+<h3>膚色保護（Skin Tone Protection）</h3>
+<p>在增加全域飽和度時，膚色區域容易變得過於鮮紅或橙色，看起來不自然。膚色保護機制的原理：</p>
+
+<div class="diagram"><svg viewBox="0 0 600 280" xmlns="http://www.w3.org/2000/svg">
+  <rect fill="#f5f0eb" width="600" height="280" rx="8"/>
+  <text x="300" y="25" text-anchor="middle" font-size="13" fill="#5a5550" font-weight="500">膚色保護飽和度調整流程</text>
+  <!-- Pipeline -->
+  <rect x="30" y="60" width="100" height="50" rx="5" fill="rgba(106,138,122,0.15)" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="80" y="82" text-anchor="middle" font-size="9" fill="#6a8a7a" font-weight="500">Pixel Input</text>
+  <text x="80" y="96" text-anchor="middle" font-size="7" fill="#8a8580">YCbCr</text>
+  <line x1="130" y1="85" x2="160" y2="85" stroke="#6a8a7a" stroke-width="1.2" marker-end="url(#arw15)"/>
+  <!-- Skin detection -->
+  <rect x="160" y="50" width="120" height="70" rx="5" fill="rgba(196,160,100,0.12)" stroke="#c4a064" stroke-width="1.5"/>
+  <text x="220" y="72" text-anchor="middle" font-size="9" fill="#c4a064" font-weight="500">膚色偵測</text>
+  <text x="220" y="88" text-anchor="middle" font-size="7" fill="#8a8580">Cb ∈ [77,127]</text>
+  <text x="220" y="100" text-anchor="middle" font-size="7" fill="#8a8580">Cr ∈ [133,173]</text>
+  <text x="220" y="112" text-anchor="middle" font-size="7" fill="#8a8580">Y  ∈ [80,220]</text>
+  <line x1="280" y1="85" x2="310" y2="85" stroke="#c4a064" stroke-width="1.2" marker-end="url(#arw15)"/>
+  <!-- Blend factor -->
+  <rect x="310" y="55" width="100" height="60" rx="5" fill="rgba(74,122,181,0.12)" stroke="#4a7ab5" stroke-width="1.5"/>
+  <text x="360" y="78" text-anchor="middle" font-size="9" fill="#4a7ab5" font-weight="500">Blend α</text>
+  <text x="360" y="95" text-anchor="middle" font-size="7" fill="#8a8580">skin → α=0 (不調)</text>
+  <text x="360" y="107" text-anchor="middle" font-size="7" fill="#8a8580">non-skin → α=1</text>
+  <line x1="410" y1="85" x2="440" y2="85" stroke="#4a7ab5" stroke-width="1.2" marker-end="url(#arw15)"/>
+  <!-- Saturation adjust -->
+  <rect x="440" y="55" width="130" height="60" rx="5" fill="rgba(106,138,122,0.15)" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="505" y="78" text-anchor="middle" font-size="9" fill="#6a8a7a" font-weight="500">Saturation Adj</text>
+  <text x="505" y="95" text-anchor="middle" font-size="7" fill="#8a8580">S_eff = 1 + α×(S-1)</text>
+  <text x="505" y="107" text-anchor="middle" font-size="7" fill="#8a8580">Cb'=(Cb-128)×S_eff+128</text>
+  <!-- Detail text -->
+  <text x="300" y="160" text-anchor="middle" font-size="10" fill="#5a5550" font-weight="500">膚色偵測的 Cb-Cr 範圍圖</text>
+  <!-- Cb-Cr plane -->
+  <rect x="150" y="170" width="160" height="90" rx="4" fill="rgba(213,206,199,0.2)" stroke="#d5cec7" stroke-width="1"/>
+  <text x="230" y="268" text-anchor="middle" font-size="8" fill="#5a5550">Cb axis</text>
+  <text x="130" y="215" text-anchor="middle" font-size="8" fill="#5a5550" transform="rotate(-90,130,215)">Cr axis</text>
+  <!-- Skin region ellipse -->
+  <ellipse cx="215" cy="215" rx="30" ry="20" fill="rgba(196,160,100,0.25)" stroke="#c4a064" stroke-width="1.5"/>
+  <text x="215" y="218" text-anchor="middle" font-size="8" fill="#c4a064">膚色區域</text>
+  <!-- Transition zone -->
+  <ellipse cx="215" cy="215" rx="45" ry="32" fill="none" stroke="#c4a064" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="275" y="200" font-size="7" fill="#8a8580">漸變過渡帶</text>
+  <!-- Formula -->
+  <text x="430" y="185" text-anchor="middle" font-size="9" fill="#5a5550">過渡帶公式：</text>
+  <text x="430" y="205" text-anchor="middle" font-size="8" fill="#8a8580">d = distance to skin center</text>
+  <text x="430" y="220" text-anchor="middle" font-size="8" fill="#8a8580">α = smoothstep(r_inner, r_outer, d)</text>
+  <text x="430" y="240" text-anchor="middle" font-size="8" fill="#8a8580">確保膚色邊界不出現</text>
+  <text x="430" y="255" text-anchor="middle" font-size="8" fill="#8a8580">突兀的飽和度跳變</text>
+  <defs><marker id="arw15" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#6a8a7a"/></marker></defs>
+</svg><div class="caption">圖 4-15：膚色保護飽和度調整的硬體流程</div></div>
+
+<h3>Hue-Selective Saturation</h3>
+<p>進階的飽和度調整可以針對不同色相（Hue）施加不同的飽和度因子。例如：增強藍天的飽和度、保持膚色不變、降低黃綠色的飽和度。硬體上通常將色相空間分為 6~12 個扇區，每個扇區有獨立的飽和度因子，扇區之間進行線性內插以避免突變。</p>
+
+<div class="info-box key">
+<div class="box-title">核心概念</div>
+飽和度調整看似簡單，但在硬體設計中有兩個關鍵挑戰：(1) 保色相——簡單的 Cb/Cr Scale 會在高飽和度區域造成色相偏移。(2) 邊界處理——飽和度增加後，YCbCr 值可能超出合法範圍（特別是 Limited Range），需要 Gamut Clipping 或 Gamut Mapping。
+</div>
+
+<div class="info-box warn">
+<div class="box-title">注意事項</div>
+飽和度調整的位置很重要。在 Gamma 之前（線性域）做飽和度調整，效果類似於 CCM 的 Off-diagonal 增強。在 Gamma 之後（非線性域）做飽和度調整，對人眼感知更均勻。大部分 ISP 選擇在 Gamma 之後進行飽和度調整，但也有 ISP 在兩處都提供調整點。
+</div>
+`,
+      keyPoints: [
+        "YCbCr 域飽和度調整只需 2 個乘法器，簡單高效",
+        "RGB 域飽和度矩陣可與 CCM 合併為一個 3×3 矩陣",
+        "保色相飽和度需 CORDIC 或 LUT 實現極坐標轉換",
+        "膚色保護透過偵測 Cb/Cr 範圍和 Blend Factor 實現",
+        "Hue-Selective Saturation 將色相空間分扇區獨立調整"
+      ]
+    },
+    {
+      id: "ch4_16",
+      title: "3D LUT 硬體實現 3D LUT Hardware Implementation",
+      content: `
+<h3>3D LUT 概述</h3>
+<p>3D Look-Up Table（3D LUT）是 ISP 色彩處理中最靈活的工具。一張 3D LUT 可以實現任意的色彩映射，包括 CCM、Gamma、飽和度調整、色相旋轉等所有操作的綜合效果。它將三維 RGB 輸入空間均勻分割為網格，每個網格頂點儲存對應的輸出 RGB 值，中間值透過插值計算。</p>
+
+<div class="diagram"><svg viewBox="0 0 600 350" xmlns="http://www.w3.org/2000/svg">
+  <rect fill="#f5f0eb" width="600" height="350" rx="8"/>
+  <text x="300" y="25" text-anchor="middle" font-size="13" fill="#5a5550" font-weight="500">3D LUT 硬體架構</text>
+  <!-- 3D Grid visualization -->
+  <g transform="translate(50,50)">
+    <text x="80" y="0" text-anchor="middle" font-size="10" fill="#6a8a7a" font-weight="500">3D Grid (17×17×17 示意)</text>
+    <!-- Simple 3D cube wireframe -->
+    <polygon points="20,120 120,120 120,20 20,20" fill="none" stroke="#d5cec7" stroke-width="1"/>
+    <polygon points="20,20 50,5 150,5 120,20" fill="none" stroke="#d5cec7" stroke-width="1"/>
+    <polygon points="120,20 150,5 150,105 120,120" fill="none" stroke="#d5cec7" stroke-width="1"/>
+    <!-- Grid lines -->
+    <line x1="53" y1="120" x2="53" y2="20" stroke="#d5cec7" stroke-width="0.5"/>
+    <line x1="86" y1="120" x2="86" y2="20" stroke="#d5cec7" stroke-width="0.5"/>
+    <line x1="20" y1="53" x2="120" y2="53" stroke="#d5cec7" stroke-width="0.5"/>
+    <line x1="20" y1="86" x2="120" y2="86" stroke="#d5cec7" stroke-width="0.5"/>
+    <!-- Grid points -->
+    <circle cx="20" cy="20" r="2.5" fill="#c4a064"/>
+    <circle cx="53" cy="20" r="2.5" fill="#c4a064"/>
+    <circle cx="86" cy="20" r="2.5" fill="#c4a064"/>
+    <circle cx="120" cy="20" r="2.5" fill="#c4a064"/>
+    <circle cx="20" cy="53" r="2.5" fill="#c4a064"/>
+    <circle cx="53" cy="53" r="2.5" fill="#c4a064"/>
+    <circle cx="120" cy="53" r="2.5" fill="#c4a064"/>
+    <circle cx="20" cy="86" r="2.5" fill="#c4a064"/>
+    <circle cx="120" cy="86" r="2.5" fill="#c4a064"/>
+    <circle cx="20" cy="120" r="2.5" fill="#c4a064"/>
+    <circle cx="120" cy="120" r="2.5" fill="#c4a064"/>
+    <!-- Axes labels -->
+    <text x="70" y="140" text-anchor="middle" font-size="8" fill="#c44040">R</text>
+    <text x="5" y="70" text-anchor="middle" font-size="8" fill="#40a040">G</text>
+    <text x="150" y="0" text-anchor="middle" font-size="8" fill="#4a7ab5">B</text>
+  </g>
+  <!-- Hardware pipeline -->
+  <g transform="translate(230,50)">
+    <text x="170" y="0" text-anchor="middle" font-size="10" fill="#5a5550" font-weight="500">硬體 Pipeline</text>
+    <!-- Address calc -->
+    <rect x="20" y="15" width="120" height="45" rx="5" fill="rgba(196,160,100,0.12)" stroke="#c4a064" stroke-width="1.5"/>
+    <text x="80" y="33" text-anchor="middle" font-size="8" fill="#c4a064" font-weight="500">Address Generator</text>
+    <text x="80" y="47" text-anchor="middle" font-size="7" fill="#8a8580">R[11:8]→idx, R[7:0]→frac</text>
+    <!-- SRAM -->
+    <line x1="80" y1="60" x2="80" y2="75" stroke="#c4a064" stroke-width="1"/>
+    <rect x="10" y="75" width="130" height="50" rx="5" fill="rgba(74,122,181,0.12)" stroke="#4a7ab5" stroke-width="1.5"/>
+    <text x="75" y="95" text-anchor="middle" font-size="8" fill="#4a7ab5" font-weight="500">SRAM (8 vertices)</text>
+    <text x="75" y="110" text-anchor="middle" font-size="7" fill="#8a8580">8 read ports or 2-cycle</text>
+    <!-- Interpolation -->
+    <line x1="80" y1="125" x2="80" y2="140" stroke="#4a7ab5" stroke-width="1"/>
+    <rect x="0" y="140" width="150" height="50" rx="5" fill="rgba(106,138,122,0.12)" stroke="#6a8a7a" stroke-width="1.5"/>
+    <text x="75" y="160" text-anchor="middle" font-size="8" fill="#6a8a7a" font-weight="500">3D Interpolation</text>
+    <text x="75" y="175" text-anchor="middle" font-size="7" fill="#8a8580">Trilinear / Tetrahedral</text>
+    <!-- Output -->
+    <line x1="75" y1="190" x2="75" y2="210" stroke="#6a8a7a" stroke-width="1"/>
+    <rect x="20" y="210" width="120" height="35" rx="5" fill="rgba(106,138,122,0.15)" stroke="#6a8a7a" stroke-width="1.5"/>
+    <text x="80" y="232" text-anchor="middle" font-size="9" fill="#6a8a7a" font-weight="500">RGB Output</text>
+  </g>
+  <!-- Memory calculation -->
+  <g transform="translate(30,270)">
+    <rect x="0" y="0" width="540" height="65" rx="6" fill="rgba(213,206,199,0.2)" stroke="#d5cec7" stroke-width="1"/>
+    <text x="270" y="18" text-anchor="middle" font-size="9" fill="#5a5550" font-weight="500">SRAM 容量計算</text>
+    <text x="20" y="36" font-size="8" fill="#8a8580">17×17×17 grid × 3 channels × 12 bits = 17³ × 36 = 176,868 bits ≈ 22 KB</text>
+    <text x="20" y="52" font-size="8" fill="#8a8580">33×33×33 grid × 3 channels × 12 bits = 33³ × 36 = 1,292,436 bits ≈ 158 KB</text>
+  </g>
+</svg><div class="caption">圖 4-16：3D LUT 硬體架構與 SRAM 容量計算</div></div>
+
+<h3>Trilinear vs Tetrahedral 插值</h3>
+<p>3D LUT 的核心計算是三維插值。兩種主流方法：</p>
+
+<div class="table-container"><table>
+<tr><th>特性</th><th>Trilinear</th><th>Tetrahedral</th></tr>
+<tr><td>原理</td><td>三軸分別做線性插值</td><td>將 Cube 分為 6 個四面體，在對應四面體內插值</td></tr>
+<tr><td>頂點數</td><td>8 個（整個 Cube）</td><td>4 個（所在四面體）</td></tr>
+<tr><td>乘法次數</td><td>7 次乘法</td><td>3 次乘法 + 3 次加法</td></tr>
+<tr><td>SRAM 讀取</td><td>8 次讀取</td><td>4 次讀取</td></tr>
+<tr><td>精度</td><td>Cube 中心附近較好</td><td>更均勻，灰軸附近更好</td></tr>
+<tr><td>硬體複雜度</td><td>較高（8 port SRAM 或多 cycle）</td><td>較低（4 port 即可）</td></tr>
+</table></div>
+
+<p>大部分 ISP 選擇 Tetrahedral 插值，因為它的硬體成本更低、灰軸精度更好（灰色像素走 Cube 的主對角線，Tetrahedral 的頂點正好在這條線上）。</p>
+
+<h3>Memory Layout 優化</h3>
+<p>3D LUT 的 SRAM 存取模式是確定性的（由 RGB 輸入值決定），因此可以針對存取模式優化 Memory Layout：</p>
+<ul>
+<li><strong>Bank Interleaving</strong>：將 8 個 Cube 頂點分佈在不同 SRAM Bank，實現單 cycle 讀取</li>
+<li><strong>Dual-port SRAM</strong>：使用 2 個 Dual-port SRAM，每 cycle 可讀 4 個頂點</li>
+<li><strong>Prefetch Buffer</strong>：利用像素掃描的局部性，預取相鄰 Cube 的數據</li>
+<li><strong>壓縮儲存</strong>：對 LUT 數據做差分編碼，減少 SRAM 位寬</li>
+</ul>
+
+<h3>Grid Size 的選擇</h3>
+<p>常見的 Grid Size 和對應的 SRAM 需求：</p>
+<ul>
+<li><strong>9×9×9</strong>：2.7 KB，精度有限，只適合簡單的色彩風格化</li>
+<li><strong>17×17×17</strong>：22 KB，最常見的選擇，平衡精度和成本</li>
+<li><strong>33×33×33</strong>：158 KB，高精度需求（如 HDR、廣色域）</li>
+<li><strong>65×65×65</strong>：1.2 MB，極致精度，只在專業影像處理設備中使用</li>
+</ul>
+
+<div class="info-box key">
+<div class="box-title">核心概念</div>
+3D LUT 的威力在於它能實現任意非線性色彩映射。但它的缺點是：(1) SRAM 面積隨 Grid Size 的三次方增長。(2) 無法像矩陣那樣輕鬆在不同色溫間內插——兩張 3D LUT 的線性混合不等於兩種色彩映射的混合。因此，在需要隨色溫連續變化的場景（如 AWB），CCM 仍然比 3D LUT 更靈活。
+</div>
+
+<div class="info-box example">
+<div class="box-title">設計範例</div>
+一個 17³ Tetrahedral 3D LUT 的典型延遲分析：Cycle 1 — Address 計算和四面體判定。Cycle 2 — SRAM 讀取 4 個頂點。Cycle 3 — 三次乘法 + 加法完成插值。總延遲 = 3 clock cycles。在 500 MHz 時鐘下，完全可以支援 4K@60fps（像素率 ≈ 600 Mpixel/s）的即時處理。
+</div>
+`,
+      keyPoints: [
+        "3D LUT 可實現任意色彩映射，是最靈活的色彩處理工具",
+        "Tetrahedral 插值比 Trilinear 硬體成本低、灰軸精度更好",
+        "17×17×17 是最常見的 Grid Size，需約 22 KB SRAM",
+        "SRAM 存取可透過 Bank Interleaving 實現單 cycle 讀取",
+        "3D LUT 的缺點是無法像 CCM 那樣在不同色溫間連續插值"
+      ]
+    },
+    {
+      id: "ch4_17",
+      title: "色溫追蹤與 AWB 收斂策略 Color Temperature Tracking",
+      content: `
+<h3>色溫追蹤的挑戰</h3>
+<p>在連續拍攝（Video）模式下，AWB 不僅需要準確估計色溫，還需要平順地追蹤場景光源變化。一個好的 AWB 系統應該做到：光源漸變時平滑過渡，光源突變時快速收斂，穩定場景中不抖動。這三個目標相互矛盾，需要精心設計的控制策略。</p>
+
+<h3>AWB 狀態機設計</h3>
+<p>實務中的 AWB 控制器通常包含一個狀態機（FSM），根據場景變化程度切換不同的收斂策略：</p>
+
+<div class="table-container"><table>
+<tr><th>狀態</th><th>觸發條件</th><th>收斂行為</th><th>典型 α 值</th></tr>
+<tr><td>Stable</td><td>連續 N 幀色溫變化 < T1</td><td>極慢更新或鎖定</td><td>0.02~0.05</td></tr>
+<tr><td>Tracking</td><td>色溫變化 ∈ [T1, T2]</td><td>正常速度追蹤</td><td>0.1~0.2</td></tr>
+<tr><td>Fast Converge</td><td>色溫變化 > T2 或場景切換</td><td>快速收斂</td><td>0.3~0.5</td></tr>
+<tr><td>Initial</td><td>開機或模式切換</td><td>最快速收斂</td><td>0.5~1.0</td></tr>
+</table></div>
+
+<h3>Temporal Filtering（時間濾波）</h3>
+<p>AWB Gain 的更新使用 IIR 濾波器進行平滑：</p>
+<div class="formula">
+Gain[n] = α × Gain_target + (1 - α) × Gain[n-1]
+</div>
+<p>其中 α 是收斂速率，Gain_target 是當前幀統計計算出的目標 Gain。α 越大收斂越快但越容易抖動。自適應 α 的策略：</p>
+<ul>
+<li>當 |Gain_target - Gain[n-1]| 大時，增大 α（快速反應）</li>
+<li>當 |Gain_target - Gain[n-1]| 小時，減小 α（穩定不抖動）</li>
+<li>當偵測到場景切換（大面積亮度/色彩突變）時，α 設為最大值</li>
+</ul>
+
+<h3>Hysteresis（遲滯效應）</h3>
+<p>為了避免 AWB 在兩個色溫之間來回跳動（oscillation），引入遲滯機制：</p>
+<ul>
+<li><strong>色溫域遲滯</strong>：只有當新的色溫估計與當前值差異超過閾值時，才開始更新</li>
+<li><strong>空間遲滯</strong>：在 R/G vs B/G 空間中，當前白點必須離開一個「鎖定區域」才觸發更新</li>
+<li><strong>時間遲滯</strong>：場景變化必須持續 N 幀以上，才判定為真正的光源變化（排除短暫遮擋）</li>
+</ul>
+
+<h3>Anti-Flicker 防閃爍</h3>
+<p>在 50Hz/60Hz 人造光源下，感測器曝光時間若非整數倍的光源週期，則每幀的統計色溫會隨相位不同而波動。Anti-Flicker 策略：</p>
+<ul>
+<li><strong>曝光時間控制</strong>：AE 模組將曝光時間鎖定為光源週期的整數倍（如 10ms 的倍數，對應 50Hz）</li>
+<li><strong>多幀平均</strong>：對 AWB 統計資料進行 2~4 幀的移動平均，消除週期性波動</li>
+<li><strong>頻率偵測</strong>：硬體可偵測統計資料中的 50Hz/60Hz 週期成分，自動切換防閃策略</li>
+</ul>
+
+<div class="info-box key">
+<div class="box-title">核心概念</div>
+AWB 收斂策略的設計本質上是控制理論的應用。核心矛盾是「速度 vs 穩定性」。太快的收斂會造成抖動（overshoot），太慢的收斂會讓使用者感覺 AWB 反應遲鈍。自適應 α 和狀態機是解決這個矛盾的關鍵工具。
+</div>
+
+<h3>場景切換偵測</h3>
+<p>快速偵測場景切換可以讓 AWB 更快地收斂到正確色溫。常用的偵測指標：</p>
+<ul>
+<li><strong>亮度突變</strong>：AE 統計的全局亮度在一幀內變化超過閾值</li>
+<li><strong>色溫突變</strong>：AWB 統計的 R/G、B/G 均值在一幀內大幅變化</li>
+<li><strong>直方圖突變</strong>：色彩直方圖的分佈形狀急劇改變</li>
+<li><strong>運動資訊</strong>：來自 Motion Estimation 模組的全域運動量（大面積平移表示可能的場景切換）</li>
+</ul>
+
+<div class="info-box tip">
+<div class="box-title">實務提示</div>
+在實際產品中，AWB 收斂策略的參數往往需要大量場景測試來調整。建議建立一套自動化測試系統，使用數百個標準場景序列（包含室內外轉換、日光/鎢絲燈切換、混合光源等），自動評估 AWB 的收斂速度和穩定性，計算每個場景的色溫誤差和收斂幀數。
+</div>
+`,
+      keyPoints: [
+        "AWB 狀態機根據場景變化程度切換收斂速率",
+        "IIR 濾波器的自適應 α 平衡速度與穩定性",
+        "遲滯機制（色溫域、空間域、時間域）防止來回跳動",
+        "Anti-Flicker 需配合曝光時間控制和多幀平均",
+        "場景切換偵測結合亮度、色溫、直方圖和運動資訊"
+      ]
+    },
+    {
+      id: "ch4_18",
+      title: "ISP 色彩校正 Tuning 參數 CCM Tuning Parameters",
+      content: `
+<h3>CCM Tuning 流程概述</h3>
+<p>CCM 的校正（Calibration）和調校（Tuning）是 ISP 色彩品質的核心工作。一組好的 CCM 參數可以讓色彩準確、自然；一組差的參數則會導致膚色偏綠、紅色過飽和等問題。CCM Tuning 需要在多種標準光源下進行，並考慮不同色溫之間的平滑過渡。</p>
+
+<h3>Per-Illuminant CCM 校正</h3>
+<p>每種光源下的最佳 CCM 是不同的，因為 Sensor 的光譜響應函數不隨光源改變，但場景中物體的顏色外觀（在不同光源下）會改變。典型的校正光源組合：</p>
+
+<div class="table-container"><table>
+<tr><th>光源</th><th>色溫</th><th>CIE 標準</th><th>典型應用場景</th></tr>
+<tr><td>Horizon (A)</td><td>2856K</td><td>CIE Illuminant A</td><td>白熾燈、暖色室內</td></tr>
+<tr><td>CWF/TL84</td><td>3500-4100K</td><td>CIE F2/F11</td><td>辦公室、商場日光燈</td></tr>
+<tr><td>D50</td><td>5000K</td><td>CIE D50</td><td>印刷標準光源</td></tr>
+<tr><td>D65</td><td>6500K</td><td>CIE D65</td><td>日光、顯示器白點</td></tr>
+<tr><td>D75</td><td>7500K</td><td>CIE D75</td><td>陰天、北方日光</td></tr>
+</table></div>
+
+<h3>CCM 校正方法</h3>
+<p>使用 Macbeth ColorChecker（24 色卡）進行校正。流程如下：</p>
+<ol>
+<li>在標準光源下拍攝 Macbeth 色卡</li>
+<li>擷取 24 個色塊的 Raw RGB 平均值</li>
+<li>減去黑電平（BLC），應用 LSC 和 WB Gain</li>
+<li>以最小化 ΔE（色差）為目標，使用最小平方法（Least Squares）或最佳化演算法求解 CCM 係數</li>
+<li>驗證：計算每個色塊的 ΔE00，確認 Mean ΔE00 < 2.0，Max ΔE00 < 5.0</li>
+</ol>
+
+<div class="formula">
+最佳化目標：min Σ ΔE00²(Lab_measured, Lab_target)<br>
+約束條件：CCM 行和 = 1（保白性），係數範圍 ∈ [-2, 3]
+</div>
+
+<h3>多光源 CCM 插值</h3>
+<p>ISP 在不同色溫下需要使用不同的 CCM。AWB 估計出當前色溫後，在最近的兩組 CCM 之間進行線性插值：</p>
+<div class="formula">
+CCM_current = w × CCM_low + (1 - w) × CCM_high<br>
+w = (CT_high - CT_current) / (CT_high - CT_low)
+</div>
+<p>其中 CT 為色溫值。注意：直接對 CCM 係數做線性插值在數學上是正確的（線性映射的線性組合仍是線性映射），但可能在中間色溫產生略微不理想的色彩。某些高階 ISP 存儲 5 組以上的 CCM，以減少插值距離。</p>
+
+<h3>AWB 與 CCM 的聯動</h3>
+<p>AWB 和 CCM 在 ISP 中是緊密耦合的：</p>
+<ul>
+<li>AWB 先估計色溫 → 選擇對應的 CCM</li>
+<li>CCM 的效果影響 AWB 統計 → AWB 統計應在 CCM 之前取樣（pre-CCM statistics）</li>
+<li>WB Gain 和 CCM 都在線性域運算，理論上可以合併為一個矩陣</li>
+<li>但實務中分開處理更靈活：WB Gain 每幀更新，CCM 只在色溫變化時切換</li>
+</ul>
+
+<h3>Golden Sample 校正</h3>
+<p>量產時，每顆 Sensor 的光譜響應會有差異（Module-to-Module Variation）。Golden Sample 校正流程：</p>
+<ol>
+<li>選擇一顆「黃金樣品」Sensor，進行完整的多光源 CCM 校正</li>
+<li>對每顆量產模組進行簡化校正（如只在 D65 下校正）</li>
+<li>計算量產模組與黃金樣品之間的「偏差矩陣」</li>
+<li>用偏差矩陣修正黃金樣品的 CCM，得到每顆模組的專屬 CCM</li>
+<li>將校正結果寫入模組的 OTP（One-Time Programmable）記憶體</li>
+</ol>
+
+<div class="info-box key">
+<div class="box-title">核心概念</div>
+CCM Tuning 的終極目標不僅是最小化 ΔE，還要考慮「視覺品質」。有時數值上 ΔE 最小的 CCM 在主觀評估中不是最好看的——因為人眼對不同顏色的容忍度不同。膚色、天空、草地等「記憶色」（Memory Color）的偏差比其他顏色更容易被察覺。因此，高階 Tuning 會對記憶色施加更高的權重。
+</div>
+
+<div class="info-box warn">
+<div class="box-title">注意事項</div>
+CCM 校正時的常見錯誤：(1) 忘記先做 BLC 和 LSC 校正，導致 CCM 試圖補償黑電平和 Shading 的影響。(2) WB Gain 和 CCM 的順序搞反。(3) 在非標準光源下校正（如使用普通 LED 燈而非標準 D65 燈箱）。(4) Macbeth 色卡老化褪色但未更換。這些錯誤都會導致 CCM 不準確。
+</div>
+`,
+      keyPoints: [
+        "CCM 需在多種標準光源（A/TL84/D50/D65/D75）下分別校正",
+        "校正使用 Macbeth 色卡，以最小化 ΔE00 為目標",
+        "不同色溫的 CCM 之間可進行線性插值",
+        "Golden Sample 校正用於修正量產模組之間的光譜差異",
+        "高階 Tuning 對記憶色（膚色、天空）施加更高權重"
+      ]
+    },
+    {
+      id: "ch4_19",
+      title: "膚色保護與特殊色處理 Skin Tone & Memory Color",
+      content: `
+<h3>記憶色的重要性</h3>
+<p>人類視覺系統對某些特定顏色有強烈的「記憶」和期望。這些顏色稱為「記憶色」（Memory Color），包括膚色、天空藍、草地綠、黃色/紅色水果等。即使色彩數值上完全準確（ΔE ≈ 0），如果這些顏色不符合人的心理期望，使用者仍會覺得「不好看」。因此，ISP 色彩處理不只追求色彩準確性，更要追求「記憶色增強」。</p>
+
+<h3>膚色保護機制</h3>
+<p>膚色是所有記憶色中最重要的。人眼對膚色的偏差極為敏感——即使只有 ΔE ≈ 2 的偏差，也能被輕易察覺。膚色保護的完整流程：</p>
+
+<h4>Step 1: 膚色偵測</h4>
+<p>在 YCbCr 或 RGB 色彩空間中定義膚色區域。不同人種的膚色在 Cb-Cr 空間中的分佈有差異，但核心區域高度重疊：</p>
+
+<div class="table-container"><table>
+<tr><th>膚色區域</th><th>Cb 範圍 (8-bit)</th><th>Cr 範圍 (8-bit)</th><th>Y 範圍 (8-bit)</th></tr>
+<tr><td>核心區域</td><td>77 ~ 127</td><td>133 ~ 173</td><td>80 ~ 220</td></tr>
+<tr><td>擴展區域</td><td>70 ~ 135</td><td>125 ~ 185</td><td>50 ~ 240</td></tr>
+<tr><td>橢圓模型中心</td><td>Cb=109</td><td>Cr=152</td><td>—</td></tr>
+</table></div>
+
+<h4>Step 2: 膚色置信度計算</h4>
+<p>不是二元判斷（是/否膚色），而是計算一個 0~1 的置信度（Confidence）值。使用橢圓距離模型：</p>
+<div class="formula">
+d² = ((Cb - Cb_center)/σ_cb)² + ((Cr - Cr_center)/σ_cr)²<br>
+Confidence = max(0, 1 - d/r_max)
+</div>
+
+<h4>Step 3: 選擇性處理</h4>
+<p>根據 Confidence 值，混合「正常處理」和「膚色友好處理」：</p>
+<ul>
+<li>飽和度：膚色區域使用較低的飽和度增益，避免膚色過紅</li>
+<li>色相：膚色區域的色相不做調整，或僅做微小的暖色偏移</li>
+<li>降噪：膚色區域使用較強的 Chroma NR，讓膚色更乾淨</li>
+<li>銳化：膚色區域降低銳化強度，避免毛孔和瑕疵被強調</li>
+</ul>
+
+<h3>天空增強</h3>
+<p>藍色天空是另一個重要的記憶色。人們期望天空呈現純淨、鮮豔的藍色。天空偵測和增強的策略：</p>
+<ul>
+<li><strong>偵測</strong>：高亮度 + 高 B/G ratio + 低紋理（天空通常是平滑的）</li>
+<li><strong>增強</strong>：增加藍色區域的飽和度、微調色相朝向純藍（240°）</li>
+<li><strong>注意</strong>：過度增強會導致天空出現色帶（Banding），特別是低 bit depth 時</li>
+</ul>
+
+<h3>草地/植物增強</h3>
+<p>綠色植物的增強需要謹慎。過度增加綠色飽和度會讓草地看起來像人工草坪。推薦策略：</p>
+<ul>
+<li>略微增加黃綠色（90°~120° Hue）的飽和度</li>
+<li>微調色相朝向鮮綠色（避免偏黃或偏藍綠）</li>
+<li>保持暗部綠色的自然感，只增強中等亮度的綠色</li>
+</ul>
+
+<h3>Hue-Selective Processing 硬體架構</h3>
+<p>上述所有的選擇性處理可以統一在一個 Hue-Selective 框架中實現。硬體架構的核心是一個「色相分類器」和「Per-Hue 參數集」：</p>
+
+<div class="diagram"><svg viewBox="0 0 600 250" xmlns="http://www.w3.org/2000/svg">
+  <rect fill="#f5f0eb" width="600" height="250" rx="8"/>
+  <text x="300" y="25" text-anchor="middle" font-size="13" fill="#5a5550" font-weight="500">Hue-Selective Processing 硬體架構</text>
+  <!-- Hue wheel simplified -->
+  <g transform="translate(100,140)">
+    <circle cx="0" cy="0" r="70" fill="none" stroke="#d5cec7" stroke-width="1"/>
+    <!-- Hue sectors -->
+    <line x1="0" y1="0" x2="70" y2="0" stroke="#c44040" stroke-width="1.5"/>
+    <text x="78" y="4" font-size="7" fill="#c44040">0° Red</text>
+    <line x1="0" y1="0" x2="35" y2="-60" stroke="#c4a064" stroke-width="1.5"/>
+    <text x="40" y="-62" font-size="7" fill="#c4a064">60° Yellow</text>
+    <line x1="0" y1="0" x2="-35" y2="-60" stroke="#6a8a7a" stroke-width="1.5"/>
+    <text x="-80" y="-62" font-size="7" fill="#6a8a7a">120° Green</text>
+    <line x1="0" y1="0" x2="-70" y2="0" stroke="#4a9a9a" stroke-width="1.5"/>
+    <text x="-95" y="4" font-size="7" fill="#4a9a9a">180° Cyan</text>
+    <line x1="0" y1="0" x2="-35" y2="60" stroke="#4a7ab5" stroke-width="1.5"/>
+    <text x="-80" y="68" font-size="7" fill="#4a7ab5">240° Blue</text>
+    <line x1="0" y1="0" x2="35" y2="60" stroke="#8a5aaa" stroke-width="1.5"/>
+    <text x="40" y="68" font-size="7" fill="#8a5aaa">300° Magenta</text>
+    <text x="0" y="95" text-anchor="middle" font-size="8" fill="#5a5550">6-sector Hue Wheel</text>
+  </g>
+  <!-- Per-hue parameters -->
+  <g transform="translate(250,50)">
+    <rect x="0" y="0" width="310" height="170" rx="6" fill="rgba(213,206,199,0.15)" stroke="#d5cec7" stroke-width="1"/>
+    <text x="155" y="20" text-anchor="middle" font-size="10" fill="#5a5550" font-weight="500">Per-Hue 參數表</text>
+    <text x="15" y="42" font-size="8" fill="#8a8580">Sector</text>
+    <text x="70" y="42" font-size="8" fill="#8a8580">Sat Gain</text>
+    <text x="130" y="42" font-size="8" fill="#8a8580">Hue Shift</text>
+    <text x="195" y="42" font-size="8" fill="#8a8580">Luma Gain</text>
+    <text x="260" y="42" font-size="8" fill="#8a8580">Protect</text>
+    <line x1="10" y1="48" x2="300" y2="48" stroke="#d5cec7" stroke-width="0.5"/>
+    <text x="15" y="62" font-size="8" fill="#c44040">Red</text>
+    <text x="80" y="62" font-size="8" fill="#5a5550">1.1</text>
+    <text x="140" y="62" font-size="8" fill="#5a5550">-3°</text>
+    <text x="205" y="62" font-size="8" fill="#5a5550">1.0</text>
+    <text x="265" y="62" font-size="8" fill="#5a5550">Skin</text>
+    <text x="15" y="78" font-size="8" fill="#c4a064">Yellow</text>
+    <text x="80" y="78" font-size="8" fill="#5a5550">1.0</text>
+    <text x="140" y="78" font-size="8" fill="#5a5550">0°</text>
+    <text x="205" y="78" font-size="8" fill="#5a5550">1.05</text>
+    <text x="265" y="78" font-size="8" fill="#5a5550">—</text>
+    <text x="15" y="94" font-size="8" fill="#6a8a7a">Green</text>
+    <text x="80" y="94" font-size="8" fill="#5a5550">1.15</text>
+    <text x="140" y="94" font-size="8" fill="#5a5550">+5°</text>
+    <text x="205" y="94" font-size="8" fill="#5a5550">1.0</text>
+    <text x="265" y="94" font-size="8" fill="#5a5550">—</text>
+    <text x="15" y="110" font-size="8" fill="#4a9a9a">Cyan</text>
+    <text x="80" y="110" font-size="8" fill="#5a5550">1.0</text>
+    <text x="140" y="110" font-size="8" fill="#5a5550">0°</text>
+    <text x="205" y="110" font-size="8" fill="#5a5550">1.0</text>
+    <text x="265" y="110" font-size="8" fill="#5a5550">—</text>
+    <text x="15" y="126" font-size="8" fill="#4a7ab5">Blue</text>
+    <text x="80" y="126" font-size="8" fill="#5a5550">1.2</text>
+    <text x="140" y="126" font-size="8" fill="#5a5550">-2°</text>
+    <text x="205" y="126" font-size="8" fill="#5a5550">0.95</text>
+    <text x="265" y="126" font-size="8" fill="#5a5550">Sky</text>
+    <text x="15" y="142" font-size="8" fill="#8a5aaa">Magenta</text>
+    <text x="80" y="142" font-size="8" fill="#5a5550">0.9</text>
+    <text x="140" y="142" font-size="8" fill="#5a5550">0°</text>
+    <text x="205" y="142" font-size="8" fill="#5a5550">1.0</text>
+    <text x="265" y="142" font-size="8" fill="#5a5550">—</text>
+    <text x="155" y="165" text-anchor="middle" font-size="7" fill="#8a8580">扇區間使用線性內插避免色彩突變</text>
+  </g>
+</svg><div class="caption">圖 4-19：Hue-Selective Processing 的色相分區與參數表</div></div>
+
+<div class="info-box key">
+<div class="box-title">核心概念</div>
+記憶色處理是 ISP 色彩品質從「準確」到「好看」的關鍵跳躍。工程師需要理解：色彩準確性（ΔE）是基礎，但最終決定影像品質的是「人眼感受」。不同品牌的手機有不同的色彩風格（如三星偏鮮豔、Apple 偏自然），這些差異很大程度上來自記憶色處理策略的不同。
+</div>
+
+<div class="info-box tip">
+<div class="box-title">實務提示</div>
+膚色偵測的 Cb-Cr 範圍需要根據目標市場調整。亞洲膚色的 Cb-Cr 分佈中心與歐洲膚色略有不同，非洲膚色的亮度範圍更寬。建議使用多人種的膚色資料庫來建立穩健的膚色模型。此外，化妝、紋身、光影效果都會影響膚色偵測，需要在實際場景中反覆驗證。
+</div>
+`,
+      keyPoints: [
+        "記憶色（膚色、天空、草地）對影像品質的主觀感受至關重要",
+        "膚色偵測使用 Cb-Cr 橢圓模型和置信度計算",
+        "Hue-Selective Processing 將色相空間分為 6~12 個扇區獨立調整",
+        "天空增強需注意 Banding 問題，草地增強需避免過度飽和",
+        "不同品牌的色彩風格差異主要來自記憶色處理策略"
+      ]
+    },
+    {
+      id: "ch4_20",
+      title: "HDR 色彩處理 Color Processing for HDR",
+      content: `
+<h3>HDR 色彩處理的獨特挑戰</h3>
+<p>High Dynamic Range（HDR）影像的色彩處理與 SDR 有本質不同。HDR 的動態範圍可達 10,000 nits 以上（SDR 通常只有 100~300 nits），色域通常使用 BT.2020 或 DCI-P3（比 sRGB 大得多）。這些擴展帶來了全新的色彩處理挑戰。</p>
+
+<h3>Wide Color Gamut (WCG)</h3>
+<p>HDR 內容通常搭配廣色域（WCG）。主要的色域標準比較：</p>
+
+<div class="table-container"><table>
+<tr><th>色域</th><th>覆蓋 CIE 1931 比例</th><th>典型用途</th><th>白點</th></tr>
+<tr><td>sRGB / BT.709</td><td>35.9%</td><td>SDR 顯示、網頁</td><td>D65</td></tr>
+<tr><td>DCI-P3</td><td>45.5%</td><td>數位電影、Apple 裝置</td><td>D65 (Display P3)</td></tr>
+<tr><td>BT.2020</td><td>75.8%</td><td>UHD TV、HDR 內容</td><td>D65</td></tr>
+<tr><td>Adobe RGB</td><td>52.1%</td><td>攝影、印刷</td><td>D65</td></tr>
+</table></div>
+
+<h3>PQ 與 HLG 傳輸曲線</h3>
+<p>SDR 使用 Gamma 曲線（BT.1886），HDR 則使用兩種新的傳輸曲線（Transfer Function）：</p>
+
+<h4>PQ (Perceptual Quantizer, SMPTE ST 2084)</h4>
+<p>基於人眼的 Barten 模型設計，將 0~10,000 nits 的亮度映射到 10-bit 編碼空間。PQ 曲線的特點是在每個亮度級別都提供剛好能被人眼感知的最小量化步長，因此編碼效率最高。</p>
+<div class="formula">
+PQ EOTF: L = 10000 × [(max(V^(1/m2) - c1, 0)) / (c2 - c3×V^(1/m2))]^(1/m1)<br>
+其中 m1=0.1593, m2=78.8438, c1=0.8359, c2=18.8516, c3=18.6875
+</div>
+
+<h4>HLG (Hybrid Log-Gamma, ARIB STD-B67)</h4>
+<p>設計為向後相容 SDR 的 HDR 格式。低亮度區域使用類似 Gamma 的曲線，高亮度區域使用對數曲線。HLG 是 scene-referred（場景參考），不指定絕對亮度，由顯示端決定映射。</p>
+
+<h3>Tone Mapping 與色彩的交互作用</h3>
+<p>HDR 內容在 SDR 顯示器上顯示時需要 Tone Mapping（色調映射）。Tone Mapping 會壓縮亮度範圍，但如果只壓縮亮度不處理色彩，會出現以下問題：</p>
+<ul>
+<li><strong>飽和度下降</strong>：高亮度區域的色彩在 Tone Mapping 後飽和度降低</li>
+<li><strong>色相偏移</strong>：不均勻的亮度壓縮導致 RGB 比例改變，引起色相偏移</li>
+<li><strong>色彩斷裂</strong>：Tone Mapping 的非線性可能造成相鄰色彩的順序反轉</li>
+</ul>
+
+<p>解決方案是 「色彩保持 Tone Mapping」（Color-Preserving Tone Mapping）：</p>
+<ol>
+<li>將 RGB 分解為亮度 L 和色度 (a, b)（如在 ICtCp 或 IPT 空間中）</li>
+<li>只對亮度 L 做 Tone Mapping → L'</li>
+<li>根據 L'/L 的比值縮放色度，保持色相和相對飽和度</li>
+<li>轉回 RGB</li>
+</ol>
+
+<h3>Color Volume Mapping</h3>
+<p>HDR 的色彩處理需要考慮「色彩體積」（Color Volume）而非僅僅是 2D 色域。Color Volume 是三維的——包括色度 (x, y) 和亮度 (L)。不同亮度級別的可用色域大小不同：高亮度時可用色域縮小，低亮度時也縮小。</p>
+
+<div class="info-box key">
+<div class="box-title">核心概念</div>
+HDR 色彩處理的核心思想轉變：從「2D 色域映射」到「3D 色彩體積映射」。SDR 時代只需要考慮平面的色域轉換（如 sRGB → P3），HDR 時代需要考慮不同亮度下的色域邊界都不同。ISP 中的 3D LUT 正好適合處理這種三維映射。
+</div>
+
+<h3>ISP 中的 HDR 色彩 Pipeline</h3>
+<p>HDR ISP 的色彩處理 Pipeline 需要特別注意：</p>
+<ul>
+<li><strong>位寬</strong>：HDR 需要至少 12-bit（典型 14-16 bit），SDR 用 8-10 bit 即可</li>
+<li><strong>CCM</strong>：在線性域處理，目標色域可能是 BT.2020 而非 sRGB</li>
+<li><strong>Gamma</strong>：替換為 PQ 或 HLG 曲線，LUT 的精度需求更高（至少 12-bit 輸入）</li>
+<li><strong>色域映射</strong>：需要 BT.2020 → Display P3 或 sRGB 的映射（大部分顯示器不支援完整 BT.2020）</li>
+<li><strong>Metadata</strong>：需要生成/傳遞 HDR Metadata（MaxCLL、MaxFALL、Mastering Display Info）</li>
+</ul>
+
+<div class="info-box tip">
+<div class="box-title">實務提示</div>
+調試 HDR 色彩時，最常見的問題是「在 SDR 螢幕上觀察 HDR 內容」。這會讓高亮度區域看起來過曝或色彩失真——這不是 ISP 的問題，而是觀察環境的問題。建議使用支援 HDR10/Dolby Vision 的專業監控顯示器來進行 HDR 色彩調校。
+</div>
+`,
+      keyPoints: [
+        "HDR 色彩處理從 2D 色域映射擴展到 3D 色彩體積映射",
+        "PQ 曲線基於人眼感知模型，HLG 向後相容 SDR",
+        "Tone Mapping 需配合色彩保持策略避免飽和度下降和色相偏移",
+        "HDR Pipeline 需要更高的位寬（12-16 bit）和更精確的 LUT",
+        "BT.2020 廣色域到 Display P3/sRGB 的映射是實務中的必要步驟"
+      ]
+    },
+    {
+      id: "ch4_21",
+      title: "色彩品質 Debug 與量測 Color Quality Debug",
+      content: `
+<h3>色彩品質量測指標</h3>
+<p>ISP 色彩品質的客觀量測是 Tuning 和 Debug 的基礎。工程師需要理解各種色彩差異指標，才能量化「色彩準不準」這個問題。</p>
+
+<h3>ΔE 色差公式</h3>
+<p>CIE 定義了多種色差公式，精度和複雜度逐步提升：</p>
+
+<div class="table-container"><table>
+<tr><th>公式</th><th>年份</th><th>計算複雜度</th><th>特點</th></tr>
+<tr><td>ΔE*ab (CIE76)</td><td>1976</td><td>低（歐氏距離）</td><td>簡單但不均勻，藍色區域敏感度過高</td></tr>
+<tr><td>ΔE*94 (CIE94)</td><td>1994</td><td>中</td><td>加入色度和色相的權重因子</td></tr>
+<tr><td>ΔE00 (CIEDE2000)</td><td>2000</td><td>高（含旋轉項）</td><td>最準確，業界標準，包含亮度/色度/色相權重 + 藍色區域旋轉修正</td></tr>
+</table></div>
+
+<p>ΔE 的感知意義（以 ΔE00 為例）：</p>
+<ul>
+<li><strong>ΔE00 < 1.0</strong>：人眼無法分辨差異（肉眼不可見）</li>
+<li><strong>ΔE00 1.0 ~ 2.0</strong>：仔細觀察可以察覺微小差異</li>
+<li><strong>ΔE00 2.0 ~ 5.0</strong>：明顯的色彩差異</li>
+<li><strong>ΔE00 > 5.0</strong>：嚴重色偏，不可接受</li>
+</ul>
+
+<h3>Macbeth ColorChecker 分析</h3>
+<p>Macbeth 24 色卡（X-Rite ColorChecker Classic）是 ISP 色彩校正和驗證的標準工具。使用流程：</p>
+<ol>
+<li>在標準光源下拍攝色卡（D65 燈箱，均勻照明）</li>
+<li>擷取 24 個色塊的 RGB/YCbCr 值（取中心區域平均，避開邊緣）</li>
+<li>轉換到 CIE Lab 色彩空間</li>
+<li>與色卡的標準 Lab 值比較，計算每個色塊的 ΔE00</li>
+<li>統計 Mean ΔE00、Max ΔE00、膚色色塊 ΔE00</li>
+</ol>
+
+<div class="table-container"><table>
+<tr><th>品質等級</th><th>Mean ΔE00</th><th>Max ΔE00</th><th>膚色 ΔE00</th></tr>
+<tr><td>優秀</td><td>< 1.5</td><td>< 3.0</td><td>< 1.5</td></tr>
+<tr><td>良好</td><td>< 2.5</td><td>< 5.0</td><td>< 2.5</td></tr>
+<tr><td>可接受</td><td>< 4.0</td><td>< 8.0</td><td>< 4.0</td></tr>
+<tr><td>不合格</td><td>> 4.0</td><td>> 8.0</td><td>> 4.0</td></tr>
+</table></div>
+
+<h3>常見色彩 Debug 場景與失敗模式</h3>
+<p>根據多年 ISP 調試經驗，以下是最常見的色彩問題和診斷方法：</p>
+
+<h4>問題 1: 全局色偏（Color Cast）</h4>
+<p><strong>症狀</strong>：整張影像偏某個顏色（偏綠、偏紅、偏藍）。<br>
+<strong>診斷</strong>：拍攝灰卡，檢查 R/G/B 三通道的比值。若 R/G ≠ 1 或 B/G ≠ 1，表示 WB 不準。<br>
+<strong>原因</strong>：AWB 演算法被大面積單色場景誤導，或 WB Gain 未正確應用。</p>
+
+<h4>問題 2: 局部色偏（邊緣偏色）</h4>
+<p><strong>症狀</strong>：影像中心色彩正確，但邊緣偏色。<br>
+<strong>診斷</strong>：拍攝白卡，觀察邊緣區域的 R/G、B/G 比值。<br>
+<strong>原因</strong>：LSC（Lens Shading Correction）不準確，或 LSC 的色彩校正（Color Shading）被忽略。</p>
+
+<h4>問題 3: 膚色偏綠</h4>
+<p><strong>症狀</strong>：人臉膚色帶有綠色調。<br>
+<strong>診斷</strong>：檢查 CCM 係數，特別是 G 通道的 Off-diagonal 元素。<br>
+<strong>原因</strong>：CCM 校正時目標色彩空間的綠色基底不準確，或 CCM 插值出錯。</p>
+
+<h4>問題 4: 飽和色失真</h4>
+<p><strong>症狀</strong>：高飽和度的紅色/藍色物體顏色不正確（如紅玫瑰偏橙）。<br>
+<strong>診斷</strong>：拍攝高飽和度色卡或真實物體，分析 Hue 偏移。<br>
+<strong>原因</strong>：CCM 溢位處理（Clamp）導致高飽和區域色彩被截斷，或 Gamma 曲線在高值區域不合理。</p>
+
+<h4>問題 5: AWB 閃爍</h4>
+<p><strong>症狀</strong>：影片中色彩不斷微幅變化，如同呼吸般閃動。<br>
+<strong>診斷</strong>：記錄每幀的 WB Gain 和色溫估計值，分析時間域波動。<br>
+<strong>原因</strong>：AWB 收斂策略的 Dead Zone 太小，或防閃爍機制未啟用。</p>
+
+<h3>Color Checker 工具與自動化</h3>
+<p>建議建立自動化色彩測試系統：</p>
+<ul>
+<li><strong>自動色卡偵測</strong>：使用影像辨識自動定位色卡中的 24 個色塊</li>
+<li><strong>自動 ΔE 計算</strong>：自動計算所有色塊的 ΔE00 並生成報告</li>
+<li><strong>趨勢追蹤</strong>：在不同韌體版本之間比較色彩品質，防止退化</li>
+<li><strong>多光源自動化</strong>：使用可程式化光源（Tunable LED），自動在多種色溫下測試</li>
+</ul>
+
+<div class="info-box key">
+<div class="box-title">核心概念</div>
+色彩 Debug 的黃金法則：「先灰後彩、先全域後局部、先客觀後主觀」。先用灰卡驗證 WB 和灰階 Linearity，確認無色偏。再用 Macbeth 色卡驗證 CCM 的色彩準確性。最後用真實場景進行主觀評估。按照這個順序，可以快速定位問題出在 Pipeline 的哪個環節。
+</div>
+
+<div class="info-box warn">
+<div class="box-title">注意事項</div>
+ΔE 量測的常見陷阱：(1) Macbeth 色卡的標準值因批次和老化而不同，務必使用實測的標準值而非理論值。(2) 拍攝時的光源必須均勻，不均勻照明會增加假的 ΔE。(3) 轉換到 Lab 空間時，必須明確使用的白點（D50 還是 D65）和觀察者角度（2° 還是 10°）。(4) 不同的 ΔE 公式（CIE76 vs CIEDE2000）結果差異很大，報告中必須明確使用的公式。
+</div>
+`,
+      keyPoints: [
+        "ΔE00 (CIEDE2000) 是業界標準色差公式，ΔE00 < 2.0 為良好品質",
+        "Macbeth 24 色卡是 CCM 校正和驗證的標準工具",
+        "常見色彩問題：全局色偏、邊緣偏色、膚色偏綠、飽和色失真、AWB 閃爍",
+        "Debug 原則：先灰後彩、先全域後局部、先客觀後主觀",
+        "自動化色彩測試系統可防止韌體版本更新導致色彩退化"
+      ]
+    },
+    {
+      id: "ch4_22",
+      title: "車用與醫療色彩要求 Automotive & Medical Color Requirements",
+      content: `
+<h3>車用 ISP 色彩要求</h3>
+<p>車用攝像頭（Automotive Camera）的色彩處理要求與消費級手機截然不同。車用場景優先考慮的是「一致性」和「可靠性」，而非「好看」。色彩處理必須確保駕駛輔助系統（ADAS）和自駕系統能正確辨識交通號誌、車燈、行人等關鍵物件。</p>
+
+<h3>車用色彩一致性要求</h3>
+<p>多攝像頭系統（環視、前視、側視）之間的色彩一致性至關重要。人眼在拼接影像中能輕易察覺色彩不一致：</p>
+
+<div class="table-container"><table>
+<tr><th>規格項目</th><th>消費級（手機）</th><th>車用（ADAS/AVM）</th></tr>
+<tr><td>色溫一致性</td><td>無硬性要求</td><td>同一場景各攝像頭色溫差 < 200K</td></tr>
+<tr><td>亮度一致性</td><td>無硬性要求</td><td>同一場景各攝像頭亮度差 < 10%</td></tr>
+<tr><td>CCM 校正</td><td>通常 1-2 組</td><td>每顆模組獨立校正 + OTP 儲存</td></tr>
+<tr><td>AWB 穩定性</td><td>容忍微幅波動</td><td>嚴格禁止閃爍，收斂後鎖定</td></tr>
+<tr><td>溫度漂移補償</td><td>通常不做</td><td>-40°C ~ +105°C 全範圍補償</td></tr>
+</table></div>
+
+<h3>LED Flicker 處理</h3>
+<p>現代交通號誌和車燈大量使用 LED，而 LED 以 PWM 方式驅動，閃爍頻率通常為 90~500 Hz。當攝像頭的曝光時間與 LED 的 PWM 頻率不同步時，拍攝到的 LED 亮度會隨幀變化（LED Flicker Mitigation, LFM）。</p>
+<ul>
+<li><strong>症狀</strong>：交通燈在影片中忽亮忽暗，甚至完全消失</li>
+<li><strong>影響</strong>：ADAS 系統可能無法正確偵測紅綠燈狀態</li>
+<li><strong>硬體解決方案</strong>：使用 Chopped HDR 或 Sub-frame 曝光技術，確保每幀至少有部分曝光時間覆蓋 LED 的亮周期</li>
+<li><strong>色彩影響</strong>：LFM 模式下的多次曝光合成可能導致色彩不一致，需要在合成後重新校正 WB</li>
+</ul>
+
+<h3>車用色彩校正流程</h3>
+<p>車用 ISP 的色彩校正流程比消費級更嚴格：</p>
+<ol>
+<li>在 EOL（End-of-Line）測試站進行每顆模組的 Golden Sample 校正</li>
+<li>校正結果（CCM、WB Gain、LSC 參數）寫入模組 OTP 或 EEPROM</li>
+<li>ISP 開機時讀取 OTP 數據，自動載入校正參數</li>
+<li>運行時根據溫度感測器（NTC）動態調整參數補償熱漂移</li>
+<li>定期進行 OTA（Over-The-Air）更新，修正長期漂移</li>
+</ol>
+
+<h3>醫療影像色彩要求</h3>
+<p>醫療攝像頭（如內視鏡、手術顯微鏡、皮膚鏡）的色彩準確性直接影響醫師的診斷。色彩要求與車用和消費級都不同：</p>
+
+<div class="table-container"><table>
+<tr><th>要求項目</th><th>規格</th><th>原因</th></tr>
+<tr><td>色彩準確性</td><td>Mean ΔE00 < 1.5</td><td>需準確呈現組織顏色（如辨別良性/惡性腫瘤）</td></tr>
+<tr><td>色彩一致性</td><td>不同裝置間 ΔE00 < 2.0</td><td>不同醫師使用不同裝置應看到相同色彩</td></tr>
+<tr><td>飽和度</td><td>禁止自動增強</td><td>飽和度增強可能改變組織外觀，影響診斷</td></tr>
+<tr><td>白平衡</td><td>校正到光源色溫，不做審美偏移</td><td>醫療光源固定，不需要場景自適應 AWB</td></tr>
+<tr><td>Gamma 曲線</td><td>可選用 DICOM GSDF</td><td>確保灰階在醫療顯示器上均勻可辨</td></tr>
+</table></div>
+
+<h3>色盲考量</h3>
+<p>設計車用 HMI（Human-Machine Interface）和醫療影像顯示時，需考慮色覺缺陷（Color Vision Deficiency）：</p>
+<ul>
+<li><strong>紅綠色盲</strong>（Protanopia/Deuteranopia）：影響約 8% 男性。避免僅用紅/綠區分關鍵資訊</li>
+<li><strong>ISP 色彩映射</strong>：某些醫療 ISP 提供「色盲模式」，將紅綠差異轉換為亮度或藍黃差異</li>
+<li><strong>車用 HUD</strong>：車用抬頭顯示的色彩選擇需確保色盲使用者也能正確判讀</li>
+</ul>
+
+<h3>法規與標準</h3>
+<p>車用和醫療領域有嚴格的色彩相關法規：</p>
+<ul>
+<li><strong>ISO 26262</strong>：車用功能安全標準。色彩處理錯誤若影響 ADAS 判斷，屬於安全相關故障</li>
+<li><strong>IEC 62471</strong>：光生物安全標準。醫療用 LED 光源的色溫和光譜需符合安全要求</li>
+<li><strong>IEC 62563-1</strong>：醫療顯示器校正標準。確保灰階和色彩呈現一致</li>
+<li><strong>SAE J3016</strong>：自駕等級定義。不同等級對攝像頭色彩品質的要求不同</li>
+<li><strong>ECE R48/R149</strong>：歐洲車燈法規。車用攝像頭需要能在法規範圍內正確辨識車燈色彩</li>
+</ul>
+
+<div class="info-box key">
+<div class="box-title">核心概念</div>
+車用和醫療 ISP 的色彩設計哲學是「準確和一致優先於好看」。消費級 ISP 追求的是讓使用者覺得照片「好看」（可以增強飽和度、美化膚色），而車用/醫療 ISP 追求的是讓色彩「忠實於真實場景」。這兩種需求的優化方向可能完全相反——消費級 ISP 的最佳參數用在車用場景可能是災難性的。
+</div>
+
+<div class="info-box example">
+<div class="box-title">設計範例</div>
+一個車用環視系統（AVM）的色彩一致性校正流程：(1) 在 EOL 站使用同一張標準灰卡和 Macbeth 色卡。(2) 四顆攝像頭分別校正 WB 和 CCM，目標值統一為同一個色彩空間。(3) 比較四顆攝像頭在相同色塊上的 Lab 值，確認 ΔE00 < 2.0。(4) 將校正參數和交叉校正偏差矩陣寫入 EEPROM。(5) ISP 運行時載入校正參數，確保拼接畫面色彩一致。
+</div>
+`,
+      keyPoints: [
+        "車用色彩要求一致性優先：多攝像頭色溫差需 < 200K",
+        "LED Flicker 是車用攝像頭的獨特挑戰，需硬體級解決方案",
+        "醫療影像禁止自動飽和度增強，色彩準確性 ΔE00 需 < 1.5",
+        "色盲考量影響車用 HMI 和醫療顯示的色彩設計",
+        "ISO 26262 等法規對車用色彩處理的可靠性有嚴格要求"
+      ]
     }
   ]
 };
