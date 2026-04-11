@@ -1933,10 +1933,10 @@ const CH3 = {
 <p>DCG 感測器的 Noise Calibration 必須分別對 LCG 和 HCG 兩個模式獨立校準。ISP 的降噪模組需要知道當前使用的是哪個 CG 模式，並切換到對應的 NLF 參數集。某些感測器支持同一幀中同時使用兩種 CG（Split-Pixel HDR），此時需要更複雜的噪聲模型。</p>
 </div>
 
-<h3>ISO Invariance 與「暴露右移」</h3>
+<h3>ISO Invariance 與「向右曝光」</h3>
 <p>一個有趣的現象是 <strong>ISO Invariance（ISO 不變性）</strong>：在某些現代感測器上，「ISO 100 拍攝後 +4 EV 數位提亮」與「直接使用 ISO 1600 拍攝」的噪聲水平非常接近。這意味著 Analog Gain 的增加並沒有帶來 SNR 的顯著改善——感測器已經接近「Read Noise Free」的狀態。</p>
 
-<p>在 ISO Invariant 的感測器上，影像品質主要由 Shot Noise 決定（Shot Noise Limited），而 Shot Noise 只取決於收集到的總光子數，與 ISO 無關。因此，「暴露右移」（ETTR, Expose to the Right）策略仍然有效——在不過曝的前提下使用盡可能多的曝光來收集更多光子，事後再降低亮度，可以獲得最低的噪聲。</p>
+<p>在 ISO Invariant 的感測器上，影像品質主要由 Shot Noise 決定（Shot Noise Limited），而 Shot Noise 只取決於收集到的總光子數，與 ISO 無關。因此，「向右曝光」（ETTR, Expose to the Right）策略仍然有效——在不過曝的前提下盡量增加曝光量來收集更多光子，事後再降低亮度，可以獲得最低的噪聲。</p>
 
 <div class="info-box tip">
 <div class="box-title">💡 提示</div>
@@ -2052,13 +2052,13 @@ const CH3 = {
 <p>Line Buffer 的行數直接決定可用的 Vertical Kernel Size。以下是典型的設計取捨：</p>
 <table>
 <tr><th>Line Buffer 行數</th><th>最大 Kernel</th><th>SRAM (4K 12-bit)</th><th>NR 品質</th></tr>
-<tr><td>5 行</td><td>5×5</td><td>28.8 KB</td><td>基礎降噪，紋理保持有限</td></tr>
-<tr><td>7 行</td><td>7×7</td><td>40.3 KB</td><td>中等品質，適合 Preview</td></tr>
-<tr><td>13 行</td><td>13×13</td><td>75.0 KB</td><td>較好品質，面積增大</td></tr>
-<tr><td>21 行</td><td>21×21</td><td>121 KB</td><td>接近 Frame Buffer 品質</td></tr>
+<tr><td>4 行</td><td>5×5</td><td>23.0 KB</td><td>基礎降噪，紋理保持有限</td></tr>
+<tr><td>6 行</td><td>7×7</td><td>34.6 KB</td><td>中等品質，適合 Preview</td></tr>
+<tr><td>12 行</td><td>13×13</td><td>69.1 KB</td><td>較好品質，面積增大</td></tr>
+<tr><td>20 行</td><td>21×21</td><td>115 KB</td><td>接近 Frame Buffer 品質</td></tr>
 </table>
 
-<p>在行動裝置 ISP 中，7~13 行 Line Buffer 是最常見的設計點。車用 ISP 因為對延遲敏感（ADAS 即時處理），通常傾向更少行數的 Line Buffer 架構。</p>
+<p>注意：K×K Kernel 只需 <strong>K−1</strong> 行 Line Buffer（儲存前 K−1 行，加上當前正在讀入的行即可湊齊 K 行窗口）。在行動裝置 ISP 中，6~12 行 Line Buffer 是最常見的設計點。車用 ISP 因為對延遲敏感（ADAS 即時處理），通常傾向更少行數的 Line Buffer 架構。</p>
 
 <div class="info-box tip">
 <div class="box-title">💡 提示</div>

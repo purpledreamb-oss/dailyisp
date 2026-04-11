@@ -1353,7 +1353,18 @@ const CH6 = {
 <h3>N-tap FIR 濾波器硬體設計</h3>
 <p>銳化濾波器的核心是一個 2D FIR（Finite Impulse Response）濾波器。以 Unsharp Mask 為例，典型的操作是先用一個低通 Kernel（如 Gaussian）對影像做平滑，再將原始像素與平滑結果相減得到高頻分量，最後加權疊回原始影像。</p>
 
-<p>在硬體中，2D FIR 通常分解為<strong>可分離（Separable）</strong>的兩組 1D 濾波：先做水平方向的 1D 濾波，再做垂直方向的 1D 濾波。這樣一個 K×K 的 2D 濾波就從 K² 次乘法降為 2K 次乘法，大幅節省面積和功耗。</p>
+<p>在硬體中，2D FIR 通常分解為<strong>可分離（Separable）</strong>的兩組 1D 濾波，將 K×K 的 2D 濾波從 K² 次乘法降為 2K 次乘法，大幅節省面積和功耗。</p>
+
+<div class="info-box tip">
+  <div class="box-title">💡 先垂直再水平（V→H）vs 先水平再垂直（H→V）</div>
+  <p>雖然數學上兩種順序等價（Separable Filter 的可交換性），但在硬體實現中，<strong>先做垂直（V）再做水平（H）</strong>往往更優：</p>
+  <ul>
+    <li><strong>Line Buffer 共用</strong>：Line Buffer 本來就以行為單位儲存，垂直 FIR 可以直接從 Line Buffer 讀取 K 行的同一列像素做 K-tap 累加，不需額外暫存器</li>
+    <li><strong>節省中間 Buffer</strong>：若先做 H，每行的水平濾波結果需要全部暫存（因為垂直 FIR 需要 K 行的水平結果），需要 K 組完整行寬的中間暫存。反之 V→H 的中間值只需每列一個暫存器，水平 FIR 在當前行內即可完成</li>
+    <li><strong>MAC 利用率</strong>：V→H 架構中，垂直 MAC 可以逐像素串流，每 Cycle 產出一個垂直濾波結果；水平 MAC 緊接處理，Pipeline 延遲更低</li>
+  </ul>
+  <p>因此，業界 ISP 硬體大多採用 <strong>V→H</strong> 的順序來實現 Separable 2D 濾波。</p>
+</div>
 
 <div class="info-box key">
   <div class="box-title">🔑 可分離濾波的效益</div>
@@ -1372,8 +1383,8 @@ const CH6 = {
 <p>Pipeline 的典型架構如下：</p>
 <ol>
   <li><strong>Stage 1 — Tap Register File</strong>：從 Line Buffer 讀取 K 行的像素值，形成 K×K 窗口</li>
-  <li><strong>Stage 2 — 水平 FIR</strong>：對每一行執行 K-tap 1D 水平濾波，輸出 K 個中間值</li>
-  <li><strong>Stage 3 — 垂直 FIR</strong>：對 K 個水平濾波結果執行 K-tap 1D 垂直濾波，輸出最終濾波值</li>
+  <li><strong>Stage 2 — 垂直 FIR</strong>：對同一列的 K 個像素執行 K-tap 1D 垂直濾波，直接利用 Line Buffer 資料，每 Cycle 輸出一個中間值</li>
+  <li><strong>Stage 3 — 水平 FIR</strong>：對垂直濾波的中間值執行 K-tap 1D 水平濾波，輸出最終濾波值</li>
   <li><strong>Stage 4 — Sharpening Core</strong>：計算 Output = Original + Gain × (Original − Filtered)</li>
   <li><strong>Stage 5 — Clamp/Saturation</strong>：將結果限制在有效範圍內</li>
 </ol>
@@ -1671,27 +1682,29 @@ output = original + enhanced_hp;
   <defs><marker id="arrowM15" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#5a5550"/></marker></defs>
   <!-- Left graph: response curves -->
   <rect x="30" y="45" width="330" height="300" rx="4" fill="none" stroke="#d5cec7" stroke-width="1"/>
+  <!-- Axes: origin at (195, 195) -->
   <line x1="60" y1="195" x2="340" y2="195" stroke="#5a5550" stroke-width="1"/>
   <line x1="195" y1="60" x2="195" y2="330" stroke="#5a5550" stroke-width="1"/>
   <text x="345" y="200" fill="#8a8580" font-size="9">Input HP</text>
   <text x="195" y="55" fill="#8a8580" font-size="9" text-anchor="middle">Output HP</text>
-  <!-- No control (linear) -->
+  <!-- ±Limit reference lines -->
+  <line x1="60" y1="140" x2="340" y2="140" stroke="#d5cec7" stroke-width="0.5" stroke-dasharray="3,3"/>
+  <line x1="60" y1="250" x2="340" y2="250" stroke="#d5cec7" stroke-width="0.5" stroke-dasharray="3,3"/>
+  <text x="55" y="143" fill="#8a8580" font-size="8" text-anchor="end">+Limit</text>
+  <text x="55" y="253" fill="#8a8580" font-size="8" text-anchor="end">u2212Limit</text>
+  <!-- No control (identity): Output = Input, 45 degree diagonal -->
   <line x1="80" y1="310" x2="310" y2="80" stroke="#8a8580" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <!-- Hard clip -->
-  <path d="M80,310 L140,250 L170,220 L195,195 L220,170 L250,140 L250,140 L340,140" fill="none" stroke="#c4a064" stroke-width="2"/>
-  <path d="M80,310 L80,250 M80,250 L140,250" fill="none" stroke="#c4a064" stroke-width="2"/>
-  <line x1="60" y1="140" x2="340" y2="140" stroke="#c4a064" stroke-width="0.5" stroke-dasharray="3,3"/>
-  <line x1="60" y1="250" x2="340" y2="250" stroke="#c4a064" stroke-width="0.5" stroke-dasharray="3,3"/>
-  <!-- Soft knee -->
-  <path d="M80,310 L140,250 L170,220 L195,195 L220,170 Q260,145 300,142 L340,141" fill="none" stroke="#6a8a7a" stroke-width="2.5"/>
-  <path d="M80,310 Q80,270 100,255 L140,250" fill="none" stroke="#6a8a7a" stroke-width="2.5"/>
+  <!-- Hard Clip: diagonal until ±Limit, then flat -->
+  <path d="M80,250 L140,250 L250,140 L340,140" fill="none" stroke="#c4a064" stroke-width="2.5"/>
+  <!-- Soft Knee: smooth transitions at knee points -->
+  <path d="M80,250 L120,250 Q145,250 170,230 L195,195 L220,160 Q245,140 270,140 L340,140" fill="none" stroke="#6a8a7a" stroke-width="2.5"/>
   <!-- Legend -->
-  <line x1="55" y1="350" x2="85" y2="350" stroke="#8a8580" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <text x="90" y="354" fill="#5a5550" font-size="10">No Control (Linear)</text>
-  <line x1="195" y1="350" x2="225" y2="350" stroke="#c4a064" stroke-width="2"/>
-  <text x="230" y="354" fill="#5a5550" font-size="10">Hard Clip</text>
-  <line x1="310" y1="350" x2="340" y2="350" stroke="#6a8a7a" stroke-width="2.5"/>
-  <text x="345" y="354" fill="#5a5550" font-size="10">Soft Knee</text>
+  <line x1="55" y1="355" x2="85" y2="355" stroke="#8a8580" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="90" y="359" fill="#8a8580" font-size="10">No Control (Linear)</text>
+  <line x1="195" y1="355" x2="225" y2="355" stroke="#c4a064" stroke-width="2.5"/>
+  <text x="230" y="359" fill="#5a5550" font-size="10">Hard Clip</text>
+  <line x1="310" y1="355" x2="340" y2="355" stroke="#6a8a7a" stroke-width="2.5"/>
+  <text x="345" y="359" fill="#5a5550" font-size="10">Soft Knee</text>
   <!-- Right diagram: hardware block -->
   <rect x="400" y="45" width="330" height="300" rx="4" fill="none" stroke="#d5cec7" stroke-width="1"/>
   <text x="565" y="70" fill="#5a5550" font-size="12" font-weight="bold" text-anchor="middle">Shoot Control Hardware</text>
@@ -2574,15 +2587,16 @@ B' = Y' + 1.772(Cb - 128)</div>
   <!-- Y' out -->
   <line x1="395" y1="90" x2="430" y2="90" stroke="#5a5550" stroke-width="2" marker-end="url(#arrowM20)"/>
   <text x="412" y="83" fill="#6a8a7a" font-size="9" font-weight="bold">Y'</text>
-  <!-- CbCr bypass path -->
-  <path d="M225,120 L245,120 L245,200 L430,200" fill="none" stroke="#8a8580" stroke-width="1.5" stroke-dasharray="5,3"/>
-  <text x="330" y="195" fill="#8a8580" font-size="9" text-anchor="middle">Cb, Cr bypass (delayed)</text>
+  <!-- CbCr bypass path: from RGB2YCbCr to Chroma Smooth to YCbCr2RGB -->
+  <path d="M225,120 L245,120 L245,170 L265,170" fill="none" stroke="#8a8580" stroke-width="1.5" marker-end="url(#arrowM20)"/>
+  <text x="255" y="162" fill="#8a8580" font-size="8">Cb, Cr</text>
   <!-- Chroma artifact suppression -->
-  <rect x="265" y="225" width="130" height="45" rx="5" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="1.5"/>
-  <text x="330" y="245" fill="#5a5550" font-size="10" text-anchor="middle">Chroma Smooth</text>
-  <text x="330" y="260" fill="#8a8580" font-size="8" text-anchor="middle">Edge-aware LPF</text>
-  <line x1="330" y1="208" x2="330" y2="225" stroke="#8a8580" stroke-width="1" marker-end="url(#arrowM20)"/>
-  <line x1="395" y1="247" x2="430" y2="200" stroke="#8a8580" stroke-width="1" marker-end="url(#arrowM20)"/>
+  <rect x="265" y="150" width="130" height="45" rx="5" fill="#6a8a7a" opacity="0.15" stroke="#6a8a7a" stroke-width="1.5"/>
+  <text x="330" y="170" fill="#5a5550" font-size="10" text-anchor="middle">Chroma Smooth</text>
+  <text x="330" y="185" fill="#8a8580" font-size="8" text-anchor="middle">Edge-aware LPF</text>
+  <!-- Chroma Smooth output to YCbCr2RGB -->
+  <path d="M395,172 L435,135" fill="none" stroke="#8a8580" stroke-width="1.5" marker-end="url(#arrowM20)"/>
+  <text x="420" y="162" fill="#8a8580" font-size="8">Cb', Cr'</text>
   <!-- YCbCr to RGB -->
   <rect x="435" y="75" width="100" height="70" rx="5" fill="#6a8a7a" opacity="0.2" stroke="#6a8a7a" stroke-width="1.5"/>
   <text x="485" y="100" fill="#5a5550" font-size="10" font-weight="bold" text-anchor="middle">YCbCr→RGB</text>
